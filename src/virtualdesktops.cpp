@@ -18,6 +18,11 @@
 #include <KWaylandServer/plasmavirtualdesktop_interface.h>
 // Qt
 #include <QAction>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSaveFile>
+#include <QStandardPaths>
 #include <QUuid>
 
 #include <algorithm>
@@ -280,6 +285,76 @@ void VirtualDesktopSpatialMap::save(KConfigGroup &group, const QStringList &know
         writeOrDelete(directionSuffix(Direction::Below), neighbors.below);
         writeOrDelete(directionSuffix(Direction::Left),  neighbors.left);
         writeOrDelete(directionSuffix(Direction::Right), neighbors.right);
+    }
+}
+
+void VirtualDesktopSpatialMap::loadJson(const QString &filePath)
+{
+    QFile file(filePath);
+    if (!file.exists()) {
+        return;
+    }
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "VirtualDesktopSpatialMap: cannot open" << filePath << "for reading";
+        return;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseError);
+    file.close();
+
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        qWarning() << "VirtualDesktopSpatialMap: failed to parse" << filePath
+                   << "-" << parseError.errorString();
+        return;
+    }
+
+    m_neighbors.clear();
+    const QJsonObject root = doc.object();
+    for (auto it = root.constBegin(); it != root.constEnd(); ++it) {
+        const QString desktopId = it.key();
+        if (!it.value().isObject()) {
+            continue;
+        }
+        const QJsonObject nbr = it.value().toObject();
+        auto apply = [&](const QString &key, Direction dir) {
+            const QString neighborId = nbr.value(key).toString();
+            if (!neighborId.isEmpty()) {
+                setNeighbor(desktopId, dir, neighborId);
+            }
+        };
+        apply(QStringLiteral("above"), Direction::Above);
+        apply(QStringLiteral("below"), Direction::Below);
+        apply(QStringLiteral("left"),  Direction::Left);
+        apply(QStringLiteral("right"), Direction::Right);
+    }
+}
+
+void VirtualDesktopSpatialMap::saveJson(const QString &filePath, const QStringList &knownIds) const
+{
+    QJsonObject root;
+    for (auto it = m_neighbors.constBegin(); it != m_neighbors.constEnd(); ++it) {
+        const QString &desktopId = it.key();
+        if (!knownIds.contains(desktopId)) {
+            continue; // omit stale entries for removed desktops
+        }
+        const DesktopNeighbors &n = it.value();
+        QJsonObject nbr;
+        nbr[QStringLiteral("above")] = n.above;
+        nbr[QStringLiteral("below")] = n.below;
+        nbr[QStringLiteral("left")]  = n.left;
+        nbr[QStringLiteral("right")] = n.right;
+        root[desktopId] = nbr;
+    }
+
+    QSaveFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly)) {
+        qWarning() << "VirtualDesktopSpatialMap: cannot open" << filePath << "for writing";
+        return;
+    }
+    file.write(QJsonDocument(root).toJson());
+    if (!file.commit()) {
+        qWarning() << "VirtualDesktopSpatialMap: failed to commit" << filePath;
     }
 }
 
@@ -910,6 +985,11 @@ void VirtualDesktopManager::load()
     m_spatialMode = group.readEntry("SpatialMode", false);
     m_spatialMap.load(group);
 
+    // JSON file takes precedence over kwinrc entries when present.
+    const QString jsonPath = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
+        + QStringLiteral("/spatial-desktop-nav.json");
+    m_spatialMap.loadJson(jsonPath);
+
     s_loadingDesktopSettings = false;
 }
 
@@ -960,6 +1040,12 @@ void VirtualDesktopManager::save()
 
     // Save to disk
     group.sync();
+
+    // Also persist the spatial neighbor map to a standalone JSON file so that
+    // external tools and the KWin scripting layer can read and write it easily.
+    const QString jsonPath = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
+        + QStringLiteral("/spatial-desktop-nav.json");
+    m_spatialMap.saveJson(jsonPath, knownIds);
 }
 
 void VirtualDesktopManager::setSpatialMode(bool enabled)
