@@ -1,0 +1,95 @@
+diff --git a/src/effects/desktopgrid/desktopgrid.cpp b/src/effects/desktopgrid/desktopgrid.cpp
+index 3530f37..3493d2c 100644
+--- a/src/effects/desktopgrid/desktopgrid.cpp
++++ b/src/effects/desktopgrid/desktopgrid.cpp
+@@ -822,7 +822,12 @@ QPointF DesktopGridEffect::scalePos(const QPoint& pos, int desktop, EffectScreen
+ {
+     QRect screenGeom = effects->clientArea(ScreenArea, screen, 0);
+     QPoint desktopCell;
+-    if (orientation == Qt::Horizontal) {
++    if (effects->isSpatialMode()) {
++        // In spatial mode, use actual grid coordinates so sparse layouts
++        // position each desktop at its assigned cell, leaving empty cells vacant.
++        QPoint coords = effects->desktopGridCoords(desktop); // 0-based (col, row)
++        desktopCell = QPoint(coords.x() + 1, coords.y() + 1); // convert to 1-based
++    } else if (orientation == Qt::Horizontal) {
+         desktopCell.setX((desktop - 1) % gridSize.width() + 1);
+         desktopCell.setY((desktop - 1) / gridSize.width() + 1);
+     } else {
+@@ -880,7 +885,9 @@ QPoint DesktopGridEffect::unscalePos(const QPoint& pos, int* desktop) const
+     scaledX -= gx;
+     scaledY -= gy;
+     if (desktop != nullptr) {
+-        if (orientation == Qt::Horizontal)
++        if (effects->isSpatialMode())
++            *desktop = effects->desktopAtCoords(QPoint(gx, gy)); // 0 if cell vacant
++        else if (orientation == Qt::Horizontal)
+             *desktop = gy * gridSize.width() + gx + 1;
+         else
+             *desktop = gx * gridSize.height() + gy + 1;
+@@ -917,6 +924,8 @@ int DesktopGridEffect::posToDesktop(const QPoint& pos) const
+     double scaledY = (pos.y() - scaledOffset[screen].y() + double(border) / 2.0) / (scaledSize[screen].height() + border);
+     int gx = qBound(0, int(scaledX), gridSize.width() - 1);     // Zero-based
+     int gy = qBound(0, int(scaledY), gridSize.height() - 1);
++    if (effects->isSpatialMode())
++        return effects->desktopAtCoords(QPoint(gx, gy)); // 0 if cell vacant
+     if (orientation == Qt::Horizontal)
+         return gy * gridSize.width() + gx + 1;
+     return gx * gridSize.height() + gy + 1;
+@@ -934,7 +943,7 @@ EffectWindow* DesktopGridEffect::windowAt(QPoint pos) const
+ 
+     int desktop;
+     pos = unscalePos(pos, &desktop);
+-    if (desktop > effects->numberOfDesktops())
++    if (desktop <= 0 || desktop > effects->numberOfDesktops())
+         return nullptr;
+     if (isUsingPresentWindows()) {
+         EffectScreen *screen = effects->screenAt(pos);
+@@ -958,7 +967,10 @@ EffectWindow* DesktopGridEffect::windowAt(QPoint pos) const
+ 
+ void DesktopGridEffect::setCurrentDesktop(int desktop)
+ {
+-    if (orientation == Qt::Horizontal) {
++    if (effects->isSpatialMode()) {
++        QPoint coords = effects->desktopGridCoords(desktop); // 0-based (col, row)
++        activeCell = QPoint(coords.x() + 1, coords.y() + 1); // convert to 1-based
++    } else if (orientation == Qt::Horizontal) {
+         activeCell.setX((desktop - 1) % gridSize.width() + 1);
+         activeCell.setY((desktop - 1) / gridSize.width() + 1);
+     } else {
+@@ -984,6 +996,8 @@ void DesktopGridEffect::setHighlightedDesktop(int d)
+ 
+ int DesktopGridEffect::desktopToRight(int desktop, bool wrap) const
+ {
++    if (effects->isSpatialMode())
++        return effects->desktopToRight(desktop, wrap);
+     // Copied from Workspace::desktopToRight()
+     int dt = desktop - 1;
+     if (orientation == Qt::Vertical) {
+@@ -1009,6 +1023,8 @@ int DesktopGridEffect::desktopToRight(int desktop, bool wrap) const
+ 
+ int DesktopGridEffect::desktopToLeft(int desktop, bool wrap) const
+ {
++    if (effects->isSpatialMode())
++        return effects->desktopToLeft(desktop, wrap);
+     // Copied from Workspace::desktopToLeft()
+     int dt = desktop - 1;
+     if (orientation == Qt::Vertical) {
+@@ -1034,6 +1050,8 @@ int DesktopGridEffect::desktopToLeft(int desktop, bool wrap) const
+ 
+ int DesktopGridEffect::desktopUp(int desktop, bool wrap) const
+ {
++    if (effects->isSpatialMode())
++        return effects->desktopAbove(desktop, wrap);
+     // Copied from Workspace::desktopUp()
+     int dt = desktop - 1;
+     if (orientation == Qt::Horizontal) {
+@@ -1059,6 +1077,8 @@ int DesktopGridEffect::desktopUp(int desktop, bool wrap) const
+ 
+ int DesktopGridEffect::desktopDown(int desktop, bool wrap) const
+ {
++    if (effects->isSpatialMode())
++        return effects->desktopBelow(desktop, wrap);
+     // Copied from Workspace::desktopDown()
+     int dt = desktop - 1;
+     if (orientation == Qt::Horizontal) {
