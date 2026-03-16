@@ -969,7 +969,109 @@ void VirtualDesktopManager::setSpatialMode(bool enabled)
     }
     m_spatialMode = enabled;
     save();
+    if (m_spatialMode) {
+        updateSpatialLayout();
+    } else {
+        // Revert to standard grid-based layout
+        updateLayout();
+    }
     Q_EMIT spatialModeChanged();
+}
+
+QVariantMap VirtualDesktopManager::spatialNeighbors(const QString &desktopId) const
+{
+    QVariantMap result;
+    result[QStringLiteral("above")] = m_spatialMap.neighbor(desktopId, VirtualDesktopSpatialMap::Direction::Above);
+    result[QStringLiteral("below")] = m_spatialMap.neighbor(desktopId, VirtualDesktopSpatialMap::Direction::Below);
+    result[QStringLiteral("left")]  = m_spatialMap.neighbor(desktopId, VirtualDesktopSpatialMap::Direction::Left);
+    result[QStringLiteral("right")] = m_spatialMap.neighbor(desktopId, VirtualDesktopSpatialMap::Direction::Right);
+    return result;
+}
+
+void VirtualDesktopManager::setSpatialNeighbor(const QString &desktopId, const QString &direction, const QString &neighborId)
+{
+    VirtualDesktopSpatialMap::Direction dir;
+    const QString dirLower = direction.toLower();
+    if (dirLower == QStringLiteral("above")) {
+        dir = VirtualDesktopSpatialMap::Direction::Above;
+    } else if (dirLower == QStringLiteral("below")) {
+        dir = VirtualDesktopSpatialMap::Direction::Below;
+    } else if (dirLower == QStringLiteral("left")) {
+        dir = VirtualDesktopSpatialMap::Direction::Left;
+    } else if (dirLower == QStringLiteral("right")) {
+        dir = VirtualDesktopSpatialMap::Direction::Right;
+    } else {
+        qWarning() << "VirtualDesktopManager::setSpatialNeighbor: unknown direction" << direction;
+        return;
+    }
+
+    m_spatialMap.setNeighbor(desktopId, dir, neighborId);
+    save();
+
+    if (m_spatialMode) {
+        updateSpatialLayout();
+    }
+    Q_EMIT spatialMapChanged();
+}
+
+void VirtualDesktopManager::updateSpatialLayout()
+{
+    if (!m_rootInfo || m_desktops.isEmpty()) {
+        return;
+    }
+
+    // BFS from the first desktop to assign (col, row) coordinates.
+    // Right → col+1, Left → col-1, Below → row+1, Above → row-1.
+    QHash<QString, QPoint> positions;
+    QQueue<VirtualDesktop *> queue;
+
+    VirtualDesktop *start = m_desktops.first();
+    positions[start->id()] = QPoint(0, 0);
+    queue.enqueue(start);
+
+    auto tryVisit = [&](const QString &fromId, const QString &neighborId, int dc, int dr) {
+        if (neighborId.isEmpty() || positions.contains(neighborId)) {
+            return;
+        }
+        VirtualDesktop *neighbor = desktopForId(neighborId);
+        if (!neighbor) {
+            return;
+        }
+        const QPoint fromPos = positions.value(fromId);
+        positions[neighborId] = QPoint(fromPos.x() + dc, fromPos.y() + dr);
+        queue.enqueue(neighbor);
+    };
+
+    while (!queue.isEmpty()) {
+        VirtualDesktop *vd = queue.dequeue();
+        const QString &id = vd->id();
+        tryVisit(id, m_spatialMap.neighbor(id, VirtualDesktopSpatialMap::Direction::Right), 1,  0);
+        tryVisit(id, m_spatialMap.neighbor(id, VirtualDesktopSpatialMap::Direction::Left),  -1, 0);
+        tryVisit(id, m_spatialMap.neighbor(id, VirtualDesktopSpatialMap::Direction::Below),  0,  1);
+        tryVisit(id, m_spatialMap.neighbor(id, VirtualDesktopSpatialMap::Direction::Above),  0, -1);
+    }
+
+    // Compute bounding box over all positioned desktops.
+    int minCol = 0, maxCol = 0, minRow = 0, maxRow = 0;
+    bool first = true;
+    for (const QPoint &pos : qAsConst(positions)) {
+        if (first) {
+            minCol = maxCol = pos.x();
+            minRow = maxRow = pos.y();
+            first = false;
+        } else {
+            minCol = qMin(minCol, pos.x());
+            maxCol = qMax(maxCol, pos.x());
+            minRow = qMin(minRow, pos.y());
+            maxRow = qMax(maxRow, pos.y());
+        }
+    }
+
+    const uint columns = static_cast<uint>(maxCol - minCol + 1);
+    const uint rows    = static_cast<uint>(maxRow - minRow + 1);
+
+    m_rootInfo->setDesktopLayout(NET::OrientationHorizontal, columns, rows, NET::DesktopLayoutCornerTopLeft);
+    m_rootInfo->activate();
 }
 
 QString VirtualDesktopManager::defaultName(int desktop) const

@@ -16,7 +16,9 @@
 #include <QObject>
 #include <QPoint>
 #include <QPointer>
+#include <QQueue>
 #include <QSize>
+#include <QVariantMap>
 
 // KDE includes
 #include <KConfig>
@@ -200,6 +202,7 @@ private:
 class KWIN_EXPORT VirtualDesktopManager : public QObject
 {
     Q_OBJECT
+    Q_CLASSINFO("D-Bus Interface", "org.kde.KWin.VirtualDesktopManager")
     /**
      * The number of virtual desktops currently available.
      * The ids of the virtual desktops are in the range [1, VirtualDesktopManager::maximum()].
@@ -216,7 +219,7 @@ class KWIN_EXPORT VirtualDesktopManager : public QObject
     /**
      * Whether spatial neighbor map navigation is enabled.
      * When true, above/below/toLeft/toRight delegate to the spatial map
-     * instead of the grid layout.
+     * instead of the grid layout. Exposed on D-Bus as a read/write property.
      */
     Q_PROPERTY(bool spatialMode READ isSpatialMode WRITE setSpatialMode NOTIFY spatialModeChanged)
 public:
@@ -449,6 +452,21 @@ public Q_SLOTS:
      */
     void setSpatialMode(bool enabled);
     /**
+     * Returns the spatial neighbors of @p desktopId as a map with keys
+     * "above", "below", "left", "right" mapped to neighbor desktop IDs.
+     * Returns an empty string for directions with no neighbor set.
+     * Exposed on D-Bus as a method on org.kde.KWin.VirtualDesktopManager.
+     */
+    Q_SCRIPTABLE QVariantMap spatialNeighbors(const QString &desktopId) const;
+    /**
+     * Sets the spatial neighbor of @p desktopId in @p direction to @p neighborId.
+     * @p direction must be one of: "above", "below", "left", "right" (case-insensitive).
+     * Pass an empty string for @p neighborId to clear the neighbor.
+     * Emits spatialMapChanged() and updates _NET_DESKTOP_LAYOUT when spatialMode is active.
+     * Exposed on D-Bus as a method on org.kde.KWin.VirtualDesktopManager.
+     */
+    Q_SCRIPTABLE void setSpatialNeighbor(const QString &desktopId, const QString &direction, const QString &neighborId);
+    /**
      * Loads number of desktops and names from configuration file
      */
     void load();
@@ -505,6 +523,12 @@ Q_SIGNALS:
      * Signal emitted whenever spatialMode changes.
      */
     void spatialModeChanged();
+    /**
+     * Signal emitted whenever the spatial neighbor map changes, i.e. when
+     * setSpatialNeighbor() modifies a neighbor entry.
+     * Exposed on D-Bus on org.kde.KWin.VirtualDesktopManager.
+     */
+    Q_SCRIPTABLE void spatialMapChanged();
 
 private Q_SLOTS:
     /**
@@ -543,6 +567,12 @@ private:
      * Generate a desktop layout from EWMH _NET_DESKTOP_LAYOUT property parameters.
      */
     void setNETDesktopLayout(Qt::Orientation orientation, uint width, uint height, int startingCorner);
+    /**
+     * Recomputes the bounding box of the spatial neighbor graph and pushes it
+     * to _NET_DESKTOP_LAYOUT. Only has effect when spatialMode is active and
+     * m_rootInfo is available. Called after any spatial map mutation.
+     */
+    void updateSpatialLayout();
     /**
      * @returns A default name for the given @p desktop
      */
