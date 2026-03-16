@@ -2,6 +2,6 @@
   "database": "dolt",
   "backend": "dolt",
   "dolt_mode": "server",
-  "dolt_database": "kde_custom_tiling",
+  "dolt_database": "plasma_spatial_workspaces",
   "project_id": "ef643627-634c-427e-b038-d553b0c0f9f5"
 }
