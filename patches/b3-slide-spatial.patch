@@ -1,0 +1,21 @@
+diff --git a/src/effects/slide/slide.cpp b/src/effects/slide/slide.cpp
+index c9cc15c..08a9c96 100644
+--- a/src/effects/slide/slide.cpp
++++ b/src/effects/slide/slide.cpp
+@@ -147,6 +147,17 @@ void SlideEffect::paintScreen(int mask, const QRegion &region, ScreenPaintData &
+         if (!clipRegion.contains(desktopGeo)) {
+             continue;
+         }
++        // In spatial mode the desktop grid may be sparse: some cells have no
++        // desktop (e.g. a 3-column grid with only 5 desktops leaves the last
++        // cell of row 1 vacant).  Skip desktops whose grid position is not
++        // occupied so those cells show wallpaper/transparent instead of
++        // intermediate desktop content during the transition.
++        if (effects->isSpatialMode()) {
++            const QPoint gridPos = effects->desktopGridCoords(i);
++            if (!effects->desktopExists(gridPos.y(), gridPos.x())) {
++                continue;
++            }
++        }
+         visibleDesktops << i;
+     }
