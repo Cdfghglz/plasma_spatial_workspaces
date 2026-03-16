@@ -1,0 +1,31 @@
+{
+  "heartbeat": {
+    "enabled": true,
+    "interval": "3m"
+  },
+  "patrols": {
+    "deacon": {
+      "enabled": true,
+      "interval": "5m",
+      "agent": "deacon"
+    },
+    "refinery": {
+      "agent": "refinery",
+      "enabled": true,
+      "interval": "5m",
+      "rigs": [
+        "plasma_spatial_workspaces"
+      ]
+    },
+    "witness": {
+      "agent": "witness",
+      "enabled": true,
+      "interval": "5m",
+      "rigs": [
+        "plasma_spatial_workspaces"
+      ]
+    }
+  },
+  "type": "daemon-patrol-config",
+  "version": 1
+}
