@@ -1732,21 +1732,30 @@ void DesktopGridEffect::slotAddDesktopInDirection(int desktop, const QString &di
         return;
     }
 
-    // Create new desktop at the end. This synchronously fires slotNumberDesktopsChanged
-    // which rebuilds tiles (without neighbor info yet).
-    const VirtualDesktop *newVd = vds->createVirtualDesktop(vds->count());
-    if (!newVd)
-        return;
+    // Capture the source desktop ID before deferring — the bridge that called us
+    // will be destroyed when createVirtualDesktop fires slotNumberDesktopsChanged.
+    const QString fromId = fromVd->id();
 
-    // Link the two desktops as spatial neighbors in both directions.
-    vds->spatialMap().setNeighbor(fromVd->id(), dir,    newVd->id());
-    vds->spatialMap().setNeighbor(newVd->id(),  oppDir, fromVd->id());
+    // Defer to next event loop iteration to avoid use-after-free:
+    // createVirtualDesktop() synchronously fires slotNumberDesktopsChanged →
+    // desktopsAdded → destroyTileOverlays, which deletes the bridge whose
+    // signal we're currently handling.
+    QMetaObject::invokeMethod(this, [this, vds, fromId, dir, oppDir]() {
+        const VirtualDesktop *newVd = vds->createVirtualDesktop(vds->count());
+        if (!newVd)
+            return;
 
-    // Rebuild tiles now that the neighbor links are in place.
-    setupGrid();
-    destroyTileOverlays();
-    createTileOverlays();
-    effects->addRepaintFull();
+        // Link the two desktops as spatial neighbors in both directions.
+        vds->spatialMap().setNeighbor(fromId,      dir,    newVd->id());
+        vds->spatialMap().setNeighbor(newVd->id(), oppDir, fromId);
+
+        // desktopsAdded() already rebuilt grid+overlays, but neighbor links
+        // weren't set yet at that point. Rebuild once more with correct state.
+        setupGrid();
+        destroyTileOverlays();
+        createTileOverlays();
+        effects->addRepaintFull();
+    }, Qt::QueuedConnection);
 }
 
 } // namespace
