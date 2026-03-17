@@ -203,6 +203,16 @@ void VirtualDesktopSpatialMap::removeDesktop(const QString &desktopId)
     }
 }
 
+bool VirtualDesktopSpatialMap::isEmpty() const
+{
+    return m_neighbors.isEmpty();
+}
+
+bool VirtualDesktopSpatialMap::containsDesktop(const QString &desktopId) const
+{
+    return m_neighbors.contains(desktopId);
+}
+
 void VirtualDesktopSpatialMap::load(const KConfigGroup &group)
 {
     m_neighbors.clear();
@@ -508,6 +518,29 @@ void VirtualDesktopManager::slotActivityRemoved(const QString &activityId)
     const QString path = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
         + QStringLiteral("/spatial-desktop-nav-") + activityId + QStringLiteral(".json");
     QFile::remove(path);
+}
+
+bool VirtualDesktopManager::isActivityAwareSpatialMode() const
+{
+    return m_spatialMode && (Activities::self() != nullptr);
+}
+
+bool VirtualDesktopManager::isDesktopInAnyActivityMap(const QString &desktopId) const
+{
+    for (const auto &smap : m_spatialMaps) {
+        if (smap.containsDesktop(desktopId)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void VirtualDesktopManager::removeDesktopFromCurrentActivityMap(const QString &desktopId)
+{
+    activeSpatialMap().removeDesktop(desktopId);
+    save();
+    updateSpatialLayout();
+    Q_EMIT spatialMapChanged();
 }
 
 void VirtualDesktopManager::setRootInfo(NETRootInfo *info)

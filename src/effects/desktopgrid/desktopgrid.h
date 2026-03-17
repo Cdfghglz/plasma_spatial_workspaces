@@ -91,6 +91,7 @@ private Q_SLOTS:
     void slotRemoveDesktop();
     void slotRemoveSpecificDesktop(int desktop);
     void slotAddDesktopInDirection(int desktop, const QString &direction);
+    void slotSpatialMapChanged();
     void slotWindowAdded(KWin::EffectWindow* w);
     void slotWindowClosed(KWin::EffectWindow *w);
     void slotWindowDeleted(KWin::EffectWindow *w);

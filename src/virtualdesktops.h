@@ -183,6 +183,19 @@ public:
      */
     void saveJson(const QString &filePath, const QStringList &knownIds) const;
 
+    /**
+     * @returns true if the spatial map has no explicit neighbor entries.
+     * An empty map means no spatial constraints have been set for this activity.
+     */
+    bool isEmpty() const;
+
+    /**
+     * @returns true if @p desktopId has any entry in the spatial neighbor map.
+     * A desktop is considered "in" this map if it has been explicitly linked
+     * as a spatial neighbor (i.e. setNeighbor was ever called for it).
+     */
+    bool containsDesktop(const QString &desktopId) const;
+
 private:
     static QString directionSuffix(Direction direction);
 
@@ -308,6 +321,30 @@ public:
      */
     VirtualDesktopSpatialMap &spatialMap();
     const VirtualDesktopSpatialMap &spatialMap() const;
+
+    /**
+     * @returns true if spatial mode is enabled AND the Activities service is present.
+     * In this configuration, desktops belong to per-activity spatial maps and deleting
+     * a desktop from the grid should only remove it from the current activity's map
+     * unless no other activity references it.
+     */
+    bool isActivityAwareSpatialMode() const;
+
+    /**
+     * @returns true if @p desktopId appears in any per-activity spatial map.
+     * Used to decide whether a desktop should be truly deleted or only hidden
+     * from the current activity after the caller has already removed it from
+     * the current activity's map.
+     */
+    bool isDesktopInAnyActivityMap(const QString &desktopId) const;
+
+    /**
+     * Removes @p desktopId from the current activity's spatial map, saves state,
+     * updates the spatial layout, and emits spatialMapChanged(). The desktop is
+     * NOT deleted globally — callers should follow up with removeVirtualDesktop()
+     * if isDesktopInAnyActivityMap() returns false after this call.
+     */
+    void removeDesktopFromCurrentActivityMap(const QString &desktopId);
 
     /**
      * @returns The ID of the desktop above desktop @a id. Wraps around to the bottom of

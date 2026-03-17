@@ -216,6 +216,8 @@ DesktopGridEffect::DesktopGridEffect()
     connect(effects, &EffectsHandler::windowDeleted, this, &DesktopGridEffect::slotWindowDeleted);
     connect(effects, &EffectsHandler::numberDesktopsChanged, this, &DesktopGridEffect::slotNumberDesktopsChanged);
     connect(effects, &EffectsHandler::windowFrameGeometryChanged, this, &DesktopGridEffect::slotWindowFrameGeometryChanged);
+    connect(VirtualDesktopManager::self(), &VirtualDesktopManager::spatialMapChanged,
+            this, &DesktopGridEffect::slotSpatialMapChanged);
     connect(effects, &EffectsHandler::screenAdded, this, &DesktopGridEffect::setup);
     connect(effects, &EffectsHandler::screenRemoved, this, &DesktopGridEffect::setup);
 
@@ -344,7 +346,19 @@ void DesktopGridEffect::paintScreen(int mask, const QRegion &region, ScreenPaint
         effects->paintScreen(mask, region, data);
         return;
     }
+    VirtualDesktopManager *vdm = VirtualDesktopManager::self();
+    const bool activityAwareSpatial = vdm->isActivityAwareSpatialMode();
+    const VirtualDesktopSpatialMap &paintSmap = vdm->spatialMap();
+    const bool spatialMapNonEmpty = activityAwareSpatial && !paintSmap.isEmpty();
     for (int desktop = 1; desktop <= effects->numberOfDesktops(); desktop++) {
+        // In activity-aware spatial mode, skip desktops that are not part of the
+        // current activity's spatial map (they are hidden from this activity).
+        // When no spatial links are set yet (empty map) all desktops are shown.
+        if (spatialMapNonEmpty) {
+            VirtualDesktop *vd = vdm->desktopForX11Id(desktop);
+            if (vd && !paintSmap.containsDesktop(vd->id()))
+                continue;
+        }
         ScreenPaintData d = data;
         paintingDesktop = desktop;
         effects->paintScreen(mask, region, d);
@@ -1428,7 +1442,29 @@ void DesktopGridEffect::slotRemoveSpecificDesktop(int desktop)
         smap.setNeighbor(belowId, Dir::Above, QString());
     }
 
-    // 4. Choose a preferred neighbor to receive orphaned windows
+    // 4. In activity-aware spatial mode: remove from the current activity's map only.
+    //    After removing, check whether any other activity still references this desktop.
+    //    If yes: hide it from this activity but preserve it globally.
+    //    If no: fall through to the global-delete path below.
+    //
+    //    Both paths are deferred to the next event loop iteration to avoid
+    //    use-after-free: removeDesktopFromCurrentActivityMap emits spatialMapChanged
+    //    synchronously (→ slotSpatialMapChanged → destroyTileOverlays), and
+    //    removeVirtualDesktop fires slotNumberDesktopsChanged (→ desktopsRemoved →
+    //    destroyTileOverlays). Either would destroy the bridge whose callback is
+    //    currently executing.
+    if (vdm->isActivityAwareSpatialMode()) {
+        QMetaObject::invokeMethod(this, [vdm, id]() {
+            vdm->removeDesktopFromCurrentActivityMap(id);
+            // If no activity still references this desktop, truly delete it.
+            if (!vdm->isDesktopInAnyActivityMap(id)) {
+                vdm->removeVirtualDesktop(id);
+            }
+        }, Qt::QueuedConnection);
+        return;
+    }
+
+    // 5. Non-activity-aware path: choose a preferred neighbor to receive orphaned windows
     //    (right > below > left > above > desktop 1).
     auto findNeighborDesktop = [&]() -> int {
         for (const QString &nid : {rightId, belowId, leftId, aboveId}) {
@@ -1442,14 +1478,14 @@ void DesktopGridEffect::slotRemoveSpecificDesktop(int desktop)
     };
     const int targetDesktop = findNeighborDesktop();
 
-    // 5. Move all windows from the deleted desktop to the target.
+    // 6. Move all windows from the deleted desktop to the target.
     const auto windows = effects->stackingOrder();
     for (EffectWindow *w : windows) {
         if (!w->isOnAllDesktops() && w->isOnDesktop(desktop))
             effects->windowToDesktop(w, targetDesktop);
     }
 
-    // 6. Defer the actual removal to the next event loop iteration.
+    // 7. Defer the actual removal to the next event loop iteration.
     //    removeVirtualDesktop() fires slotNumberDesktopsChanged synchronously,
     //    which destroys the tile overlays — including the bridge whose callback
     //    we're currently executing. Deferring avoids use-after-free.
@@ -1467,6 +1503,21 @@ void DesktopGridEffect::slotNumberDesktopsChanged(uint old)
         desktopsAdded(old);
     else
         desktopsRemoved(old);
+}
+
+void DesktopGridEffect::slotSpatialMapChanged()
+{
+    // When the spatial map changes while the grid is active in spatial mode,
+    // rebuild the tile overlays so that desktops removed from the current
+    // activity's map disappear from the grid immediately.
+    if (!activated)
+        return;
+    if (!static_cast<EffectsHandlerImpl*>(effects)->isSpatialMode())
+        return;
+    setupGrid();
+    destroyTileOverlays();
+    createTileOverlays();
+    effects->addRepaintFull();
 }
 
 void DesktopGridEffect::desktopsAdded(int old)
@@ -1623,8 +1674,19 @@ void DesktopGridEffect::createTileOverlays()
     m_tileOverlays.reserve(n);
     m_tileBridges.reserve(n);
 
+    VirtualDesktopManager *vdm = VirtualDesktopManager::self();
+    const bool activityAwareSpatial = vdm->isActivityAwareSpatialMode();
+    const VirtualDesktopSpatialMap &smap = vdm->spatialMap();
+
     for (int i = 0; i < n; ++i) {
         const int desktop = i + 1;
+        // In activity-aware spatial mode, don't create tiles for desktops hidden
+        // from the current activity (i.e. not in this activity's spatial map).
+        if (activityAwareSpatial && !smap.isEmpty()) {
+            VirtualDesktop *vd = vdm->desktopForX11Id(desktop);
+            if (vd && !smap.containsDesktop(vd->id()))
+                continue;
+        }
         auto *bridge = new TileOverlayBridge(desktop, this);
         bridge->setRemoveCallback([this, desktop]() { slotRemoveSpecificDesktop(desktop); });
         connect(bridge, &TileOverlayBridge::addDesktopRequested,
