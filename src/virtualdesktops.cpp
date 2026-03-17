@@ -60,9 +60,10 @@ void VirtualDesktopManager::setVirtualDesktopManagement(KWaylandServer::PlasmaVi
         pvd->sendDone();
 
         connect(desktop, &VirtualDesktop::nameChanged, pvd,
-            [desktop, pvd] {
+            [this, desktop, pvd] {
                 pvd->setName(desktop->name());
                 pvd->sendDone();
+                save();
             }
         );
         connect(pvd, &PlasmaVirtualDesktopInterface::activateRequested, this,
