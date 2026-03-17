@@ -1,11 +1,11 @@
 diff --git a/src/effects.cpp b/src/effects.cpp
-index 6e04585..2738399 100644
+index 6e04585..3b72a81 100644
 --- a/src/effects.cpp
 +++ b/src/effects.cpp
-@@ -986,6 +986,16 @@ QPoint EffectsHandlerImpl::desktopGridCoords(int id) const
+@@ -986,6 +986,42 @@ QPoint EffectsHandlerImpl::desktopGridCoords(int id) const
      return VirtualDesktopManager::self()->grid().gridCoords(id);
  }
- 
+
 +bool EffectsHandlerImpl::isSpatialMode() const
 +{
 +    return VirtualDesktopManager::self()->isSpatialMode();
@@ -16,27 +16,67 @@ index 6e04585..2738399 100644
 +    return VirtualDesktopManager::self()->grid().at(QPoint(col, row)) != nullptr;
 +}
 +
++QPoint EffectsHandlerImpl::removingDesktopGridCoords() const
++{
++    return m_removingDesktopGridCoords;
++}
++
++int EffectsHandlerImpl::removingDesktop() const
++{
++    return m_removingDesktop;
++}
++
++void EffectsHandlerImpl::slotDesktopAboutToBeRemoved(KWin::VirtualDesktop *desktop)
++{
++    // Capture the desktop's grid position while the grid still reflects the
++    // pre-removal state (before renumbering and updateLayout in VDM).
++    m_removingDesktop = static_cast<int>(desktop->x11DesktopNumber());
++    m_removingDesktopGridCoords = VirtualDesktopManager::self()->grid().gridCoords(desktop);
++    Q_EMIT desktopAboutToBeRemoved(m_removingDesktop);
++}
++
  QPoint EffectsHandlerImpl::desktopCoords(int id) const
  {
      QPoint coords = VirtualDesktopManager::self()->grid().gridCoords(id);
+@@ -162,2 +162,4 @@ EffectsHandlerImpl::EffectsHandlerImpl(Compositor *compositor, Scene *scene)
+     connect(VirtualDesktopManager::self(), &VirtualDesktopManager::desktopRemoved,
+             this, &EffectsHandlerImpl::slotDesktopRemoved);
++    connect(VirtualDesktopManager::self(), &VirtualDesktopManager::desktopAboutToBeRemoved,
++            this, &EffectsHandlerImpl::slotDesktopAboutToBeRemoved);
 diff --git a/src/effects.h b/src/effects.h
-index 9dfa35f..4d7bc05 100644
+index 9dfa35f..8c3d1f2 100644
 --- a/src/effects.h
 +++ b/src/effects.h
-@@ -92,6 +92,8 @@ public:
+@@ -92,6 +92,12 @@ public:
      int workspaceHeight() const override;
      int desktopAtCoords(QPoint coords) const override;
      QPoint desktopGridCoords(int id) const override;
 +    bool isSpatialMode() const override;
 +    bool desktopExists(int row, int col) const override;
++    QPoint removingDesktopGridCoords() const override;
++    int removingDesktop() const override;
      QPoint desktopCoords(int id) const override;
      int desktopAbove(int desktop = 0, bool wrap = true) const override;
      int desktopToRight(int desktop = 0, bool wrap = true) const override;
+@@ -99,7 +105,16 @@ public:
+     int desktopToLeft(int desktop = 0, bool wrap = true) const override;
+     int desktopBelow(int desktop = 0, bool wrap = true) const override;
+
++private Q_SLOTS:
++    void slotDesktopAboutToBeRemoved(KWin::VirtualDesktop *desktop);
++
+ private:
++    // Pre-removal snapshot set by slotDesktopAboutToBeRemoved().
++    // Valid between desktopAboutToBeRemoved() and desktopRemoved() signals.
++    int m_removingDesktop = -1;
++    QPoint m_removingDesktopGridCoords;
++
+     EffectsScene *m_scene;
 diff --git a/src/libkwineffects/kwineffects.h b/src/libkwineffects/kwineffects.h
-index 3e34fa8..7c79bfe 100644
+index 3e34fa8..9f1b8a4 100644
 --- a/src/libkwineffects/kwineffects.h
 +++ b/src/libkwineffects/kwineffects.h
-@@ -997,6 +997,19 @@ public:
+@@ -997,6 +997,37 @@ public:
       * @returns The coords of desktop @a id in grid units.
       */
      virtual QPoint desktopGridCoords(int id) const = 0;
@@ -53,6 +93,35 @@ index 3e34fa8..7c79bfe 100644
 +     * @param col The zero-based column index in the desktop grid.
 +     */
 +    virtual bool desktopExists(int row, int col) const = 0;
++    /**
++     * @returns The pre-removal grid coordinates of the desktop currently being
++     * removed, captured before renumbering and grid rebuild.  Valid only in
++     * the window between desktopAboutToBeRemoved() and desktopRemoved() signals.
++     * Returns QPoint(-1, -1) when no removal is in progress.
++     */
++    virtual QPoint removingDesktopGridCoords() const = 0;
++    /**
++     * @returns The x11DesktopNumber of the desktop currently being removed,
++     * as it was before renumbering.  Valid only between desktopAboutToBeRemoved()
++     * and desktopRemoved() signals.  Returns -1 when no removal is in progress.
++     */
++    virtual int removingDesktop() const = 0;
      /**
       * @returns The coords of the top-left corner of desktop @a id in pixels.
       */
+@@ -1620,6 +1651,14 @@ Q_SIGNALS:
+      */
+     void desktopRemoved(int desktop);
+
++    /**
++     * Emitted just before a virtual desktop is removed, while the desktop
++     * grid and x11DesktopNumbers still reflect the pre-removal state.
++     * Effects that need the desktop's pre-removal grid position for their
++     * removal animation should use this signal rather than desktopRemoved().
++     * @param desktop The x11DesktopNumber of the desktop about to be removed.
++     */
++    void desktopAboutToBeRemoved(int desktop);
++
+     /**
+      * Signal emitted when the number of desktops changed.
+      * The signal is emitted after the change has been applied.

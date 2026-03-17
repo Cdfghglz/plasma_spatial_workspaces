@@ -549,6 +549,15 @@ Q_SIGNALS:
     void desktopCreated(KWin::VirtualDesktop *desktop);
 
     /**
+     * Emitted just before a desktop is removed, while the desktop grid and
+     * x11DesktopNumbers still reflect the pre-removal state.  Effects that
+     * need the desktop's current grid position for their removal animation
+     * should connect to this signal rather than desktopRemoved().
+     * @param desktop the desktop that is about to be removed.
+     */
+    void desktopAboutToBeRemoved(KWin::VirtualDesktop *desktop);
+
+    /**
      * A desktop has been removed and is about to be deleted
      * @param desktop the desktop that has been removed.
      *          It's guaranteed to stil la valid pointer when the signal arrives,

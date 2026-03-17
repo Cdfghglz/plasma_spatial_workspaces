@@ -11,11 +11,17 @@ index c9cc15c..08a9c96 100644
 +        // cell of row 1 vacant).  Skip desktops whose grid position is not
 +        // occupied so those cells show wallpaper/transparent instead of
 +        // intermediate desktop content during the transition.
++        // For the desktop currently being removed, use the pre-removal coords
++        // cached by the effects handler (desktopGridCoords() would return the
++        // wrong position after VDM renumbering and grid rebuild).
 +        if (effects->isSpatialMode()) {
-+            const QPoint gridPos = effects->desktopGridCoords(i);
++            const QPoint gridPos = (i == effects->removingDesktop())
++                ? effects->removingDesktopGridCoords()
++                : effects->desktopGridCoords(i);
 +            if (!effects->desktopExists(gridPos.y(), gridPos.x())) {
 +                continue;
 +            }
 +        }
          visibleDesktops << i;
      }
+

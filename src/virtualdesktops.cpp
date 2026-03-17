@@ -879,6 +879,10 @@ void VirtualDesktopManager::removeVirtualDesktop(VirtualDesktop *desktop)
         }
     }
 
+    // Notify effects *before* renumbering and grid rebuild so they can snapshot
+    // the desktop's current grid position for removal animations.
+    Q_EMIT desktopAboutToBeRemoved(desktop);
+
     const uint oldCurrent = m_current->x11DesktopNumber();
     const uint i = desktop->x11DesktopNumber() - 1;
     m_desktops.remove(i);
