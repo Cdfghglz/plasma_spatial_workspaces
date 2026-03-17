@@ -1715,19 +1715,15 @@ void DesktopGridEffect::slotAddDesktopInDirection(int desktop, const QString &di
     if (!fromVd)
         return;
 
-    VirtualDesktopSpatialMap::Direction dir, oppDir;
+    QString oppDirection;
     if (direction == QStringLiteral("above")) {
-        dir    = VirtualDesktopSpatialMap::Direction::Above;
-        oppDir = VirtualDesktopSpatialMap::Direction::Below;
+        oppDirection = QStringLiteral("below");
     } else if (direction == QStringLiteral("below")) {
-        dir    = VirtualDesktopSpatialMap::Direction::Below;
-        oppDir = VirtualDesktopSpatialMap::Direction::Above;
+        oppDirection = QStringLiteral("above");
     } else if (direction == QStringLiteral("left")) {
-        dir    = VirtualDesktopSpatialMap::Direction::Left;
-        oppDir = VirtualDesktopSpatialMap::Direction::Right;
+        oppDirection = QStringLiteral("right");
     } else if (direction == QStringLiteral("right")) {
-        dir    = VirtualDesktopSpatialMap::Direction::Right;
-        oppDir = VirtualDesktopSpatialMap::Direction::Left;
+        oppDirection = QStringLiteral("left");
     } else {
         return;
     }
@@ -1740,14 +1736,16 @@ void DesktopGridEffect::slotAddDesktopInDirection(int desktop, const QString &di
     // createVirtualDesktop() synchronously fires slotNumberDesktopsChanged →
     // desktopsAdded → destroyTileOverlays, which deletes the bridge whose
     // signal we're currently handling.
-    QMetaObject::invokeMethod(this, [this, vds, fromId, dir, oppDir]() {
+    QMetaObject::invokeMethod(this, [this, vds, fromId, direction, oppDirection]() {
         const VirtualDesktop *newVd = vds->createVirtualDesktop(vds->count());
         if (!newVd)
             return;
 
         // Link the two desktops as spatial neighbors in both directions.
-        vds->spatialMap().setNeighbor(fromId,      dir,    newVd->id());
-        vds->spatialMap().setNeighbor(newVd->id(), oppDir, fromId);
+        // Use setSpatialNeighbor() (public API) so that _NET_DESKTOP_LAYOUT
+        // is updated and the changes are persisted to kwinrc.
+        vds->setSpatialNeighbor(fromId,      direction,    newVd->id());
+        vds->setSpatialNeighbor(newVd->id(), oppDirection, fromId);
 
         // desktopsAdded() already rebuilt grid+overlays, but neighbor links
         // weren't set yet at that point. Rebuild once more with correct state.
