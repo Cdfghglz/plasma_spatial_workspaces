@@ -98,6 +98,8 @@ public:
         Q_EMIT addDesktopRequested(m_desktop, direction);
     }
 
+    Q_INVOKABLE void setEditing(bool editing) { Q_EMIT editingChanged(editing); }
+
     void notifyDesktopNameChanged() { Q_EMIT desktopNameChanged(); }
     void notifyTotalDesktopsChanged() { Q_EMIT totalDesktopsChanged(); }
     void notifyNeighborsChanged() { Q_EMIT neighborsChanged(); }
@@ -107,6 +109,7 @@ Q_SIGNALS:
     void totalDesktopsChanged();
     void neighborsChanged();
     void addDesktopRequested(int desktop, const QString &direction);
+    void editingChanged(bool editing);
 
 private:
     bool hasSpatialNeighbor(VirtualDesktopSpatialMap::Direction dir) const {
@@ -806,6 +809,11 @@ void DesktopGridEffect::grabbedKeyboardEvent(QKeyEvent* e)
         return;
     if (windowMove != nullptr)
         return;
+    // Forward keyboard events to tile overlay when editing desktop name
+    if (m_editingTileOverlay) {
+        m_editingTileOverlay->forwardKeyEvent(e);
+        return;
+    }
     if (e->type() == QEvent::KeyPress) {
         // check for global shortcuts
         // HACK: keyboard grab disables the global shortcuts so we have to check for global shortcut (bug 156155)
@@ -831,15 +839,19 @@ void DesktopGridEffect::grabbedKeyboardEvent(QKeyEvent* e)
         switch(e->key()) {
             // Wrap only on autorepeat
         case Qt::Key_Left:
+        case Qt::Key_H:    // vim: left
             setHighlightedDesktop(desktopToLeft(highlightedDesktop, !e->isAutoRepeat()));
             break;
         case Qt::Key_Right:
+        case Qt::Key_L:    // vim: right
             setHighlightedDesktop(desktopToRight(highlightedDesktop, !e->isAutoRepeat()));
             break;
         case Qt::Key_Up:
+        case Qt::Key_K:    // vim: up
             setHighlightedDesktop(desktopUp(highlightedDesktop, !e->isAutoRepeat()));
             break;
         case Qt::Key_Down:
+        case Qt::Key_J:    // vim: down
             setHighlightedDesktop(desktopDown(highlightedDesktop, !e->isAutoRepeat()));
             break;
         case Qt::Key_Escape:
@@ -1614,6 +1626,9 @@ void DesktopGridEffect::createTileOverlays()
         connect(view, &OffscreenQuickView::repaintNeeded, this, []() {
             effects->addRepaintFull();
         });
+        connect(bridge, &TileOverlayBridge::editingChanged, this, [this, view](bool editing) {
+            m_editingTileOverlay = editing ? view : nullptr;
+        });
         view->rootContext()->setContextProperty(QStringLiteral("bridge"), bridge);
         view->setSource(QUrl::fromLocalFile(qmlPath));
 
@@ -1634,6 +1649,7 @@ void DesktopGridEffect::createTileOverlays()
 
 void DesktopGridEffect::destroyTileOverlays()
 {
+    m_editingTileOverlay = nullptr;
     qDeleteAll(m_tileOverlays);
     m_tileOverlays.clear();
     qDeleteAll(m_tileBridges);

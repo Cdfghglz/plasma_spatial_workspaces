@@ -38,6 +38,9 @@ Item {
         font.bold: true
         horizontalAlignment: TextInput.AlignHCenter
         visible: activeFocus
+        onActiveFocusChanged: {
+            if (bridge) bridge.setEditing(activeFocus)
+        }
         onAccepted: {
             if (bridge) bridge.desktopName = text
             focus = false
@@ -48,13 +51,23 @@ Item {
         }
     }
 
+    // Double-click to rename: use a Timer to distinguish single vs double click.
+    // Single clicks must NOT be accepted so they propagate to C++ for desktop selection.
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton
+        property bool pendingDoubleClick: false
+        onPressed: {
+            pendingDoubleClick = false
+            mouse.accepted = false  // let C++ handle press immediately
+        }
+        onReleased: mouse.accepted = false
         onDoubleClicked: {
+            // Double-click triggers rename
             nameInput.text = bridge ? bridge.desktopName : ""
             nameInput.forceActiveFocus()
             nameInput.selectAll()
+            mouse.accepted = true  // consume the double-click
         }
     }
 

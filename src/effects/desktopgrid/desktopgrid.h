@@ -178,6 +178,7 @@ private:
     // Per-tile QML overlays (one per desktop)
     QVector<OffscreenQuickScene*> m_tileOverlays;
     QVector<TileOverlayBridge*> m_tileBridges;
+    OffscreenQuickScene *m_editingTileOverlay = nullptr; // overlay with active TextInput
 
     QAction *m_gestureAction;
     QAction *m_shortcutAction;
