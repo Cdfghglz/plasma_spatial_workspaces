@@ -303,7 +303,8 @@ public:
     bool isSpatialMode() const;
 
     /**
-     * @returns The spatial neighbor map.
+     * @returns The spatial neighbor map for the current activity.
+     * When activities are disabled, returns a global map.
      */
     VirtualDesktopSpatialMap &spatialMap();
     const VirtualDesktopSpatialMap &spatialMap() const;
@@ -576,6 +577,10 @@ private Q_SLOTS:
      * Slot for switch to desktop below action.
      */
     void slotDown();
+    /**
+     * Removes the spatial map for the given activity when it is deleted.
+     */
+    void slotActivityRemoved(const QString &activityId);
 
 private:
     /**
@@ -588,6 +593,23 @@ private:
      * m_rootInfo is available. Called after any spatial map mutation.
      */
     void updateSpatialLayout();
+    /**
+     * Connects to Activities signals if the Activities singleton is available.
+     * Called during load() after the Activities singleton is set up.
+     */
+    void initActivities();
+    /**
+     * Returns the spatial neighbor map for the current activity (non-const).
+     * Creates an empty map entry if none exists for the current activity.
+     * Falls back to a global key when Activities are disabled.
+     */
+    VirtualDesktopSpatialMap &activeSpatialMap();
+    /**
+     * Returns the spatial neighbor map for the current activity (const).
+     * Returns a static empty map if none exists for the current activity.
+     * Falls back to a global key when Activities are disabled.
+     */
+    const VirtualDesktopSpatialMap &activeSpatialMap() const;
     /**
      * @returns A default name for the given @p desktop
      */
@@ -622,7 +644,9 @@ private:
     quint32 m_rows = 2;
     bool m_navigationWrapsAround;
     VirtualDesktopGrid m_grid;
-    VirtualDesktopSpatialMap m_spatialMap;
+    // Per-activity spatial maps keyed by activity ID.
+    // The key "__default__" is used when Activities are disabled.
+    QHash<QString, VirtualDesktopSpatialMap> m_spatialMaps;
     bool m_spatialMode = false;
     // TODO: QPointer
     NETRootInfo *m_rootInfo;
@@ -850,13 +874,13 @@ bool VirtualDesktopManager::isSpatialMode() const
 inline
 VirtualDesktopSpatialMap &VirtualDesktopManager::spatialMap()
 {
-    return m_spatialMap;
+    return activeSpatialMap();
 }
 
 inline
 const VirtualDesktopSpatialMap &VirtualDesktopManager::spatialMap() const
 {
-    return m_spatialMap;
+    return activeSpatialMap();
 }
 
 inline

@@ -8,6 +8,7 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 #include "virtualdesktops.h"
+#include "activities.h"
 #include "input.h"
 // KDE
 #include <KConfigGroup>
@@ -445,6 +446,46 @@ VirtualDesktopManager::~VirtualDesktopManager()
     s_manager = nullptr;
 }
 
+static const QString &defaultActivityKey()
+{
+    static const QString key = QStringLiteral("__default__");
+    return key;
+}
+
+VirtualDesktopSpatialMap &VirtualDesktopManager::activeSpatialMap()
+{
+    const QString activityId = (Activities::self() && !Activities::self()->current().isEmpty())
+        ? Activities::self()->current()
+        : defaultActivityKey();
+    return m_spatialMaps[activityId];
+}
+
+const VirtualDesktopSpatialMap &VirtualDesktopManager::activeSpatialMap() const
+{
+    const QString activityId = (Activities::self() && !Activities::self()->current().isEmpty())
+        ? Activities::self()->current()
+        : defaultActivityKey();
+    auto it = m_spatialMaps.constFind(activityId);
+    if (it != m_spatialMaps.constEnd()) {
+        return it.value();
+    }
+    static const VirtualDesktopSpatialMap empty;
+    return empty;
+}
+
+void VirtualDesktopManager::initActivities()
+{
+    if (Activities *activities = Activities::self()) {
+        connect(activities, &Activities::removed, this, &VirtualDesktopManager::slotActivityRemoved,
+                Qt::UniqueConnection);
+    }
+}
+
+void VirtualDesktopManager::slotActivityRemoved(const QString &activityId)
+{
+    m_spatialMaps.remove(activityId);
+}
+
 void VirtualDesktopManager::setRootInfo(NETRootInfo *info)
 {
     m_rootInfo = info;
@@ -478,7 +519,7 @@ VirtualDesktop *VirtualDesktopManager::above(VirtualDesktop *desktop, bool wrap)
     }
 
     if (m_spatialMode) {
-        const QString neighborId = m_spatialMap.neighbor(desktop->id(), VirtualDesktopSpatialMap::Direction::Above);
+        const QString neighborId = activeSpatialMap().neighbor(desktop->id(), VirtualDesktopSpatialMap::Direction::Above);
         if (!neighborId.isEmpty()) {
             VirtualDesktop *neighbor = desktopForId(neighborId);
             if (neighbor) {
@@ -521,7 +562,7 @@ VirtualDesktop *VirtualDesktopManager::toRight(VirtualDesktop *desktop, bool wra
     }
 
     if (m_spatialMode) {
-        const QString neighborId = m_spatialMap.neighbor(desktop->id(), VirtualDesktopSpatialMap::Direction::Right);
+        const QString neighborId = activeSpatialMap().neighbor(desktop->id(), VirtualDesktopSpatialMap::Direction::Right);
         if (!neighborId.isEmpty()) {
             VirtualDesktop *neighbor = desktopForId(neighborId);
             if (neighbor) {
@@ -563,7 +604,7 @@ VirtualDesktop *VirtualDesktopManager::below(VirtualDesktop *desktop, bool wrap)
     }
 
     if (m_spatialMode) {
-        const QString neighborId = m_spatialMap.neighbor(desktop->id(), VirtualDesktopSpatialMap::Direction::Below);
+        const QString neighborId = activeSpatialMap().neighbor(desktop->id(), VirtualDesktopSpatialMap::Direction::Below);
         if (!neighborId.isEmpty()) {
             VirtualDesktop *neighbor = desktopForId(neighborId);
             if (neighbor) {
@@ -606,7 +647,7 @@ VirtualDesktop *VirtualDesktopManager::toLeft(VirtualDesktop *desktop, bool wrap
     }
 
     if (m_spatialMode) {
-        const QString neighborId = m_spatialMap.neighbor(desktop->id(), VirtualDesktopSpatialMap::Direction::Left);
+        const QString neighborId = activeSpatialMap().neighbor(desktop->id(), VirtualDesktopSpatialMap::Direction::Left);
         if (!neighborId.isEmpty()) {
             VirtualDesktop *neighbor = desktopForId(neighborId);
             if (neighbor) {
@@ -761,8 +802,10 @@ void VirtualDesktopManager::removeVirtualDesktop(VirtualDesktop *desktop)
         return;
     }
 
-    // Remove from spatial map before deleting
-    m_spatialMap.removeDesktop(desktop->id());
+    // Remove from all per-activity spatial maps before deleting
+    for (auto &smap : m_spatialMaps) {
+        smap.removeDesktop(desktop->id());
+    }
 
     const uint oldCurrent = m_current->x11DesktopNumber();
     const uint i = desktop->x11DesktopNumber() - 1;
@@ -844,7 +887,9 @@ void VirtualDesktopManager::setCount(uint count)
             }
         }
         for (auto desktop : desktopsToRemove) {
-            m_spatialMap.removeDesktop(desktop->id());
+            for (auto &smap : m_spatialMaps) {
+                smap.removeDesktop(desktop->id());
+            }
             Q_EMIT desktopRemoved(desktop);
             desktop->deleteLater();
         }
@@ -983,14 +1028,16 @@ void VirtualDesktopManager::load()
     m_rows = qBound(1, rows, n);
 
     m_spatialMode = group.readEntry("SpatialMode", false);
-    m_spatialMap.load(group);
+    m_spatialMaps[defaultActivityKey()].load(group);
 
     // JSON file takes precedence over kwinrc entries when present.
     const QString jsonPath = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
         + QStringLiteral("/spatial-desktop-nav.json");
-    m_spatialMap.loadJson(jsonPath);
+    m_spatialMaps[defaultActivityKey()].loadJson(jsonPath);
 
     s_loadingDesktopSettings = false;
+
+    initActivities();
 }
 
 void VirtualDesktopManager::save()
@@ -1036,7 +1083,7 @@ void VirtualDesktopManager::save()
 
     group.writeEntry("Rows", m_rows);
     group.writeEntry("SpatialMode", m_spatialMode);
-    m_spatialMap.save(group, knownIds);
+    activeSpatialMap().save(group, knownIds);
 
     // Save to disk
     group.sync();
@@ -1045,7 +1092,7 @@ void VirtualDesktopManager::save()
     // external tools and the KWin scripting layer can read and write it easily.
     const QString jsonPath = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
         + QStringLiteral("/spatial-desktop-nav.json");
-    m_spatialMap.saveJson(jsonPath, knownIds);
+    activeSpatialMap().saveJson(jsonPath, knownIds);
 }
 
 void VirtualDesktopManager::setSpatialMode(bool enabled)
@@ -1067,10 +1114,10 @@ void VirtualDesktopManager::setSpatialMode(bool enabled)
 QVariantMap VirtualDesktopManager::spatialNeighbors(const QString &desktopId) const
 {
     QVariantMap result;
-    result[QStringLiteral("above")] = m_spatialMap.neighbor(desktopId, VirtualDesktopSpatialMap::Direction::Above);
-    result[QStringLiteral("below")] = m_spatialMap.neighbor(desktopId, VirtualDesktopSpatialMap::Direction::Below);
-    result[QStringLiteral("left")]  = m_spatialMap.neighbor(desktopId, VirtualDesktopSpatialMap::Direction::Left);
-    result[QStringLiteral("right")] = m_spatialMap.neighbor(desktopId, VirtualDesktopSpatialMap::Direction::Right);
+    result[QStringLiteral("above")] = activeSpatialMap().neighbor(desktopId, VirtualDesktopSpatialMap::Direction::Above);
+    result[QStringLiteral("below")] = activeSpatialMap().neighbor(desktopId, VirtualDesktopSpatialMap::Direction::Below);
+    result[QStringLiteral("left")]  = activeSpatialMap().neighbor(desktopId, VirtualDesktopSpatialMap::Direction::Left);
+    result[QStringLiteral("right")] = activeSpatialMap().neighbor(desktopId, VirtualDesktopSpatialMap::Direction::Right);
     return result;
 }
 
@@ -1091,7 +1138,7 @@ void VirtualDesktopManager::setSpatialNeighbor(const QString &desktopId, const Q
         return;
     }
 
-    m_spatialMap.setNeighbor(desktopId, dir, neighborId);
+    activeSpatialMap().setNeighbor(desktopId, dir, neighborId);
     save();
 
     if (m_spatialMode) {
@@ -1131,10 +1178,10 @@ void VirtualDesktopManager::updateSpatialLayout()
     while (!queue.isEmpty()) {
         VirtualDesktop *vd = queue.dequeue();
         const QString &id = vd->id();
-        tryVisit(id, m_spatialMap.neighbor(id, VirtualDesktopSpatialMap::Direction::Right), 1,  0);
-        tryVisit(id, m_spatialMap.neighbor(id, VirtualDesktopSpatialMap::Direction::Left),  -1, 0);
-        tryVisit(id, m_spatialMap.neighbor(id, VirtualDesktopSpatialMap::Direction::Below),  0,  1);
-        tryVisit(id, m_spatialMap.neighbor(id, VirtualDesktopSpatialMap::Direction::Above),  0, -1);
+        tryVisit(id, activeSpatialMap().neighbor(id, VirtualDesktopSpatialMap::Direction::Right), 1,  0);
+        tryVisit(id, activeSpatialMap().neighbor(id, VirtualDesktopSpatialMap::Direction::Left),  -1, 0);
+        tryVisit(id, activeSpatialMap().neighbor(id, VirtualDesktopSpatialMap::Direction::Below),  0,  1);
+        tryVisit(id, activeSpatialMap().neighbor(id, VirtualDesktopSpatialMap::Direction::Above),  0, -1);
     }
 
     // Compute bounding box over all positioned desktops.
