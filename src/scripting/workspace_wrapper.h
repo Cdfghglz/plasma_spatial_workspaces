@@ -42,7 +42,7 @@ class WorkspaceWrapper : public QObject
     Q_PROPERTY(int workspaceHeight READ workspaceHeight)
     Q_PROPERTY(QSize workspaceSize READ workspaceSize)
     /**
-     * The number of desktops currently used. Minimum number of desktops is 1, maximum 20.
+     * The number of desktops currently used. Minimum number of desktops is 1, maximum 100.
      */
     Q_PROPERTY(int desktops READ numberOfDesktops WRITE setNumberOfDesktops NOTIFY numberDesktopsChanged)
     /**
