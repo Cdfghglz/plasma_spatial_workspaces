@@ -41,6 +41,47 @@ namespace KWin
 
 // WARNING, TODO: This effect relies on the desktop layout being EWMH-compliant.
 
+// ---- TileOverlayBridge ----
+
+class TileOverlayBridge : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int desktop READ desktop CONSTANT)
+    Q_PROPERTY(QString desktopName READ desktopName WRITE setDesktopName NOTIFY desktopNameChanged)
+    Q_PROPERTY(int totalDesktops READ totalDesktops NOTIFY totalDesktopsChanged)
+public:
+    explicit TileOverlayBridge(int desktop, QObject *parent = nullptr)
+        : QObject(parent), m_desktop(desktop) {}
+
+    int desktop() const { return m_desktop; }
+
+    QString desktopName() const {
+        return effects->desktopName(m_desktop);
+    }
+
+    void setDesktopName(const QString &name) {
+        if (name == effects->desktopName(m_desktop))
+            return;
+        effects->setDesktopName(m_desktop, name);
+        Q_EMIT desktopNameChanged();
+    }
+
+    int totalDesktops() const { return effects->numberOfDesktops(); }
+
+    void notifyDesktopNameChanged() { Q_EMIT desktopNameChanged(); }
+    void notifyTotalDesktopsChanged() { Q_EMIT totalDesktopsChanged(); }
+
+Q_SIGNALS:
+    void desktopNameChanged();
+    void totalDesktopsChanged();
+
+private:
+    int m_desktop;
+};
+
+// ---- DesktopGridEffect ----
+
+
 DesktopGridEffect::DesktopGridEffect()
     : activated(false)
     , timeline()
@@ -265,10 +306,14 @@ void DesktopGridEffect::paintScreen(int mask, const QRegion &region, ScreenPaint
         effects->paintScreen(mask, region, d);
     }
 
-    // paint the add desktop button
-    for (OffscreenQuickScene *view : qAsConst(m_desktopButtons)) {
-        view->rootItem()->setOpacity(timeline.currentValue());
-        effects->renderOffscreenQuickView(view);
+    // Render per-tile overlays (desktop names + inline rename)
+    if (!m_tileOverlays.isEmpty()) {
+        updateTileOverlayGeometry();
+        const qreal opacity = timeline.currentValue();
+        for (OffscreenQuickScene *view : qAsConst(m_tileOverlays)) {
+            view->rootItem()->setOpacity(opacity);
+            effects->renderOffscreenQuickView(view);
+        }
     }
 
     if (isUsingPresentWindows() && windowMove && wasWindowMove) {
@@ -281,36 +326,6 @@ void DesktopGridEffect::paintScreen(int mask, const QRegion &region, ScreenPaint
         effects->drawWindow(windowMove, PAINT_WINDOW_TRANSFORMED | PAINT_WINDOW_LANCZOS, infiniteRegion(), d);
     }
 
-    if (desktopNameAlignment) {
-        const QList<EffectScreen *> screens = effects->screens();
-        for (EffectScreen *screen : screens) {
-            QRect screenGeom = effects->clientArea(ScreenArea, screen, effects->currentDesktop());
-            int desktop = 1;
-            for (EffectFrame * frame : qAsConst(desktopNames)) {
-                QPointF posTL(scalePos(screenGeom.topLeft(), desktop, screen));
-                QPointF posBR(scalePos(screenGeom.bottomRight(), desktop, screen));
-                QRect textArea(posTL.x(), posTL.y(), posBR.x() - posTL.x(), posBR.y() - posTL.y());
-                textArea.adjust(textArea.width() / 10, textArea.height() / 10,
-                                -textArea.width() / 10, -textArea.height() / 10);
-                int x, y;
-                if (desktopNameAlignment & Qt::AlignLeft)
-                    x = textArea.x();
-                else if (desktopNameAlignment & Qt::AlignRight)
-                    x = textArea.right();
-                else
-                    x = textArea.center().x();
-                if (desktopNameAlignment & Qt::AlignTop)
-                    y = textArea.y();
-                else if (desktopNameAlignment & Qt::AlignBottom)
-                    y = textArea.bottom();
-                else
-                    y = textArea.center().y();
-                frame->setPosition(QPoint(x, y));
-                frame->render(region, timeline.currentValue(), 0.7);
-                ++desktop;
-            }
-        }
-    }
 }
 
 void DesktopGridEffect::postPaintScreen()
@@ -506,7 +521,7 @@ void DesktopGridEffect::windowInputMouseEvent(QEvent* e)
         return;
     QMouseEvent* me = static_cast< QMouseEvent* >(e);
     if (!(wasWindowMove || wasDesktopMove)) {
-        for (OffscreenQuickScene *view : qAsConst(m_desktopButtons)) {
+        for (OffscreenQuickScene *view : qAsConst(m_tileOverlays)) {
             view->forwardMouseEvent(me);
             if (e->isAccepted()) {
                 return;
@@ -1129,19 +1144,6 @@ void DesktopGridEffect::setup()
     }
     hoverTimeline[effects->currentDesktop() - 1]->setCurrentTime(hoverTimeline[effects->currentDesktop() - 1]->duration());
 
-    // Create desktop name textures if enabled
-    if (desktopNameAlignment) {
-        QFont font;
-        font.setBold(true);
-        font.setPointSize(12);
-        for (int i = 0; i < effects->numberOfDesktops(); i++) {
-            EffectFrame* frame = effects->effectFrame(EffectFrameUnstyled, false);
-            frame->setFont(font);
-            frame->setText(effects->desktopName(i + 1));
-            frame->setAlignment(desktopNameAlignment);
-            desktopNames.append(frame);
-        }
-    }
     setupGrid();
     setCurrentDesktop(effects->currentDesktop());
 
@@ -1168,46 +1170,7 @@ void DesktopGridEffect::setup()
         }
     }
 
-    auto it = m_desktopButtons.begin();
-    const QList<EffectScreen *> screens = DesktopGridConfig::showAddRemove() ? effects->screens() : QList<EffectScreen *>{};
-    for (EffectScreen *screen : screens) {
-        OffscreenQuickScene *view;
-        QSize size;
-        if (it == m_desktopButtons.end()) {
-            view = new OffscreenQuickScene(this);
-
-            connect(view, &OffscreenQuickView::repaintNeeded, this, []() {
-                effects->addRepaintFull();
-            });
-
-            view->rootContext()->setContextProperty("effects", effects);
-            view->setSource(QUrl(QStandardPaths::locate(QStandardPaths::GenericDataLocation, QStringLiteral("kwin/effects/desktopgrid/main.qml"))));
-
-            QQuickItem *rootItem = view->rootItem();
-            if (!rootItem) {
-                delete view;
-                continue;
-            }
-
-            m_desktopButtons.append(view);
-            it = m_desktopButtons.end(); // changed through insert!
-
-            size = QSize(rootItem->implicitWidth(), rootItem->implicitHeight());
-        } else {
-            view = *it;
-            ++it;
-            size = view->size();
-        }
-        const QRect screenRect = effects->clientArea(FullScreenArea, screen, 1);
-        view->show(); // pseudo show must happen before geometry changes
-        const QPoint position(screenRect.right() - m_effectiveBorder/3 - size.width(),
-                              screenRect.bottom() - m_effectiveBorder/3 - size.height());
-        view->setGeometry(QRect(position, size));
-    }
-    while (it != m_desktopButtons.end()) {
-        (*it)->deleteLater();
-        it = m_desktopButtons.erase(it);
-    }
+    createTileOverlays();
 }
 
 void DesktopGridEffect::setupGrid()
@@ -1277,10 +1240,7 @@ void DesktopGridEffect::setupGrid()
 
 void DesktopGridEffect::finish()
 {
-    if (desktopNameAlignment) {
-        qDeleteAll(desktopNames);
-        desktopNames.clear();
-    }
+    destroyTileOverlays();
 
     if (isUsingPresentWindows()) {
         for (auto it = m_managers.begin(); it != m_managers.end(); ++it) {
@@ -1292,15 +1252,6 @@ void DesktopGridEffect::finish()
             }
         }
     }
-    QTimer::singleShot(zoomDuration + 1, this,
-        [this] {
-            if (activated)
-                return;
-            for (OffscreenQuickScene *view : qAsConst(m_desktopButtons)) {
-                view->hide();
-            }
-        }
-    );
     setHighlightedDesktop(effects->currentDesktop());   // Ensure selected desktop is highlighted
 
     windowMoveElevateTimer->stop();
@@ -1405,20 +1356,6 @@ void DesktopGridEffect::desktopsAdded(int old)
         hoverTimeline.append(newTimeline);
     }
 
-    // Create desktop name textures if enabled
-    if (desktopNameAlignment) {
-        QFont font;
-        font.setBold(true);
-        font.setPointSize(12);
-        for (int i = old; i < desktop; i++) {
-            EffectFrame* frame = effects->effectFrame(EffectFrameUnstyled, false);
-            frame->setFont(font);
-            frame->setText(effects->desktopName(i + 1));
-            frame->setAlignment(desktopNameAlignment);
-            desktopNames.append(frame);
-        }
-    }
-
     if (isUsingPresentWindows()) {
         const QList<EffectScreen *> screens = effects->screens();
         for (EffectScreen *screen : screens) {
@@ -1437,6 +1374,8 @@ void DesktopGridEffect::desktopsAdded(int old)
     }
 
     setupGrid();
+    destroyTileOverlays();
+    createTileOverlays();
 
     // and repaint
     effects->addRepaintFull();
@@ -1447,10 +1386,6 @@ void DesktopGridEffect::desktopsRemoved(int old)
     const int desktop = effects->numberOfDesktops();
     for (int i = desktop; i < old; i++) {
         delete hoverTimeline.takeLast();
-        if (desktopNameAlignment) {
-            delete desktopNames.last();
-            desktopNames.removeLast();
-        }
         if (isUsingPresentWindows()) {
             const QList<EffectScreen *> screens = effects->screens();
             for (EffectScreen *screen : screens) {
@@ -1478,6 +1413,8 @@ void DesktopGridEffect::desktopsRemoved(int old)
     }
 
     setupGrid();
+    destroyTileOverlays();
+    createTileOverlays();
 
     // and repaint
     effects->addRepaintFull();
@@ -1536,5 +1473,106 @@ bool DesktopGridEffect::isRelevantWithPresentWindows(EffectWindow *w) const
     return true;
 }
 
+// ---- Per-tile overlay management ----
+
+void DesktopGridEffect::createTileOverlays()
+{
+    destroyTileOverlays();
+
+    const int n = effects->numberOfDesktops();
+    if (n == 0)
+        return;
+
+    const QString qmlPath = QStandardPaths::locate(
+        QStandardPaths::GenericDataLocation,
+        QStringLiteral("kwin/effects/desktopgrid/tile_overlay.qml"));
+    if (qmlPath.isEmpty()) {
+        qWarning() << "DesktopGridEffect: tile_overlay.qml not found";
+        return;
+    }
+
+    m_tileOverlays.reserve(n);
+    m_tileBridges.reserve(n);
+
+    for (int i = 0; i < n; ++i) {
+        const int desktop = i + 1;
+        auto *bridge = new TileOverlayBridge(desktop, this);
+        m_tileBridges.append(bridge);
+
+        auto *view = new OffscreenQuickScene(this);
+        connect(view, &OffscreenQuickView::repaintNeeded, this, []() {
+            effects->addRepaintFull();
+        });
+        view->rootContext()->setContextProperty(QStringLiteral("bridge"), bridge);
+        view->setSource(QUrl::fromLocalFile(qmlPath));
+
+        QQuickItem *rootItem = view->rootItem();
+        if (!rootItem) {
+            qWarning() << "DesktopGridEffect: failed to load tile_overlay.qml for desktop" << desktop;
+            delete view;
+            delete m_tileBridges.takeLast();
+            continue;
+        }
+
+        view->show();
+        m_tileOverlays.append(view);
+    }
+
+    updateTileOverlayGeometry();
+}
+
+void DesktopGridEffect::destroyTileOverlays()
+{
+    qDeleteAll(m_tileOverlays);
+    m_tileOverlays.clear();
+    qDeleteAll(m_tileBridges);
+    m_tileBridges.clear();
+}
+
+void DesktopGridEffect::updateTileOverlayGeometry()
+{
+    if (m_tileOverlays.isEmpty())
+        return;
+
+    const QList<EffectScreen *> screens = effects->screens();
+    if (screens.isEmpty())
+        return;
+
+    // Position overlays on the primary (first) screen
+    EffectScreen *screen = screens.first();
+
+    if (!scaledOffset.contains(screen) || !scaledSize.contains(screen))
+        return;
+
+    const QPointF offset   = scaledOffset[screen];
+    const QSizeF  tileSize = scaledSize[screen];
+
+    for (int i = 0; i < m_tileOverlays.count(); ++i) {
+        const int desktop = i + 1;
+
+        // Compute 1-based grid cell for this desktop
+        QPoint cell;
+        if (static_cast<EffectsHandlerImpl*>(effects)->isSpatialMode()) {
+            const QPoint coords = effects->desktopGridCoords(desktop); // 0-based (col, row)
+            cell = QPoint(coords.x() + 1, coords.y() + 1);
+        } else if (orientation == Qt::Horizontal) {
+            cell = QPoint((desktop - 1) % gridSize.width() + 1,
+                          (desktop - 1) / gridSize.width() + 1);
+        } else {
+            cell = QPoint((desktop - 1) / gridSize.height() + 1,
+                          (desktop - 1) % gridSize.height() + 1);
+        }
+
+        const QPointF tl(
+            offset.x() + (cell.x() - 1) * (tileSize.width()  + m_effectiveBorder),
+            offset.y() + (cell.y() - 1) * (tileSize.height() + m_effectiveBorder));
+        const QRect tileRect(tl.toPoint(),
+                             QSize(qRound(tileSize.width()), qRound(tileSize.height())));
+        m_tileOverlays[i]->setGeometry(tileRect);
+    }
+}
+
 } // namespace
+
+#include "desktopgrid.moc"
 

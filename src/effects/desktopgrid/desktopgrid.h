@@ -23,6 +23,7 @@ namespace KWin
 {
 
 class PresentWindowsEffectProxy;
+class TileOverlayBridge;
 
 class DesktopGridEffect
     : public Effect
@@ -119,6 +120,11 @@ private:
     void desktopsRemoved(int old);
     QVector<int> desktopList(const EffectWindow *w) const;
 
+    // Per-tile overlay management
+    void createTileOverlays();
+    void destroyTileOverlays();
+    void updateTileOverlayGeometry();
+
     QList<ElectricBorder> borderActivate;
     int zoomDuration;
     int border;
@@ -150,8 +156,6 @@ private:
     // Soft highlighting
     QList<QTimeLine*> hoverTimeline;
 
-    QList< EffectFrame* > desktopNames;
-
     QSize gridSize;
     Qt::Orientation orientation;
     QPoint activeCell;
@@ -169,7 +173,9 @@ private:
     QRect m_windowMoveGeometry;
     QPoint m_windowMoveStartPoint;
 
-    QVector<OffscreenQuickScene*> m_desktopButtons;
+    // Per-tile QML overlays (one per desktop)
+    QVector<OffscreenQuickScene*> m_tileOverlays;
+    QVector<TileOverlayBridge*> m_tileBridges;
 
     QAction *m_gestureAction;
     QAction *m_shortcutAction;

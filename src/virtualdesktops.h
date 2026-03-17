@@ -168,6 +168,21 @@ public:
      */
     void save(KConfigGroup &group, const QStringList &knownIds) const;
 
+    /**
+     * Loads spatial neighbor entries from a JSON file at @p filePath.
+     * The JSON object maps desktop UUID strings to neighbor objects with keys
+     * "above", "below", "left", "right". On success, replaces the current
+     * in-memory map. Silently does nothing if the file does not exist.
+     */
+    void loadJson(const QString &filePath);
+
+    /**
+     * Saves spatial neighbor entries to a JSON file at @p filePath.
+     * Only entries for desktop IDs in @p knownIds are written; stale entries
+     * are omitted. Creates or overwrites the file atomically via a temp file.
+     */
+    void saveJson(const QString &filePath, const QStringList &knownIds) const;
+
 private:
     static QString directionSuffix(Direction direction);
 
