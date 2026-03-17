@@ -1200,9 +1200,9 @@ void VirtualDesktopManager::setSpatialNeighbor(const QString &desktopId, const Q
     activeSpatialMap().setNeighbor(desktopId, dir, neighborId);
     save();
 
-    if (m_spatialMode) {
-        updateSpatialLayout();
-    }
+    // Always update layout when neighbors are explicitly set — the caller
+    // is building a spatial layout regardless of the global spatialMode toggle.
+    updateSpatialLayout();
     Q_EMIT spatialMapChanged();
 }
 
