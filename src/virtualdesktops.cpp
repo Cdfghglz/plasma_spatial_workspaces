@@ -479,6 +479,16 @@ void VirtualDesktopManager::initActivities()
     if (Activities *activities = Activities::self()) {
         connect(activities, &Activities::removed, this, &VirtualDesktopManager::slotActivityRemoved,
                 Qt::UniqueConnection);
+        // When the current activity changes, the active spatial map changes too.
+        // Re-compute the grid layout and notify callers (e.g. KWin scripts via D-Bus).
+        connect(activities, &Activities::currentChanged, this,
+                [this](const QString &) {
+                    if (m_spatialMode) {
+                        updateSpatialLayout();
+                    }
+                    Q_EMIT spatialMapChanged();
+                },
+                Qt::UniqueConnection);
     }
 }
 
