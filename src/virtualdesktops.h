@@ -647,6 +647,9 @@ private:
     // Per-activity spatial maps keyed by activity ID.
     // The key "__default__" is used when Activities are disabled.
     QHash<QString, VirtualDesktopSpatialMap> m_spatialMaps;
+    // Throwaway map for writes when Activities is present but current() is not yet set.
+    // Data written here is intentionally discarded; it is never saved to disk.
+    VirtualDesktopSpatialMap m_pendingSpatialMap;
     bool m_spatialMode = false;
     // TODO: QPointer
     NETRootInfo *m_rootInfo;

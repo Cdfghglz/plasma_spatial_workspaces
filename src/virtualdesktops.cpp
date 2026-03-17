@@ -455,23 +455,33 @@ static const QString &defaultActivityKey()
 
 VirtualDesktopSpatialMap &VirtualDesktopManager::activeSpatialMap()
 {
-    const QString activityId = (Activities::self() && !Activities::self()->current().isEmpty())
-        ? Activities::self()->current()
-        : defaultActivityKey();
-    return m_spatialMaps[activityId];
+    if (Activities *activities = Activities::self()) {
+        const QString activityId = activities->current();
+        if (!activityId.isEmpty()) {
+            return m_spatialMaps[activityId];
+        }
+        // Activities service present but current activity not yet set (startup race).
+        // Return a throwaway slot so transient writes don't pollute __default__.
+        // The slot is consistent within the startup window but is never saved to disk.
+        return m_pendingSpatialMap;
+    }
+    return m_spatialMaps[defaultActivityKey()];
 }
 
 const VirtualDesktopSpatialMap &VirtualDesktopManager::activeSpatialMap() const
 {
-    const QString activityId = (Activities::self() && !Activities::self()->current().isEmpty())
-        ? Activities::self()->current()
-        : defaultActivityKey();
-    auto it = m_spatialMaps.constFind(activityId);
-    if (it != m_spatialMaps.constEnd()) {
-        return it.value();
-    }
     static const VirtualDesktopSpatialMap empty;
-    return empty;
+    if (Activities *activities = Activities::self()) {
+        const QString activityId = activities->current();
+        if (activityId.isEmpty()) {
+            // Activities present but not yet initialized — no map to read.
+            return empty;
+        }
+        auto it = m_spatialMaps.constFind(activityId);
+        return (it != m_spatialMaps.constEnd()) ? it.value() : empty;
+    }
+    auto it = m_spatialMaps.constFind(defaultActivityKey());
+    return (it != m_spatialMaps.constEnd()) ? it.value() : empty;
 }
 
 void VirtualDesktopManager::initActivities()
@@ -1110,17 +1120,29 @@ void VirtualDesktopManager::save()
 
     group.writeEntry("Rows", m_rows);
     group.writeEntry("SpatialMode", m_spatialMode);
-    m_spatialMaps[defaultActivityKey()].save(group, knownIds);
+
+    // Only write the __default__ kwinrc entries when Activities are disabled.
+    // When Activities are enabled every map lives in its own JSON file; writing
+    // __default__ into kwinrc would cause stale data to be re-read on the next
+    // cold boot before the per-activity JSON files are loaded.
+    const bool activitiesEnabled = (Activities::self() != nullptr);
+    if (!activitiesEnabled) {
+        m_spatialMaps[defaultActivityKey()].save(group, knownIds);
+    }
 
     // Save to disk
     group.sync();
 
     // Persist spatial neighbor maps to JSON files.
-    // The default/global map goes to the legacy file for backward compatibility.
-    // Each per-activity map gets its own file: spatial-desktop-nav-<activity-id>.json.
+    // When Activities are disabled the single map goes to the legacy file.
+    // When Activities are enabled each activity map gets its own file;
+    // the legacy default file is intentionally left alone so that older
+    // KWin versions that don't know about activities can still read something.
     const QString configDir = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation);
-    m_spatialMaps[defaultActivityKey()].saveJson(
-        configDir + QStringLiteral("/spatial-desktop-nav.json"), knownIds);
+    if (!activitiesEnabled) {
+        m_spatialMaps[defaultActivityKey()].saveJson(
+            configDir + QStringLiteral("/spatial-desktop-nav.json"), knownIds);
+    }
 
     for (auto it = m_spatialMaps.constBegin(); it != m_spatialMaps.constEnd(); ++it) {
         if (it.key() == defaultActivityKey()) {
