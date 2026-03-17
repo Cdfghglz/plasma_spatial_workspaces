@@ -52,6 +52,11 @@ class TileOverlayBridge : public QObject
     Q_PROPERTY(int desktop READ desktop CONSTANT)
     Q_PROPERTY(QString desktopName READ desktopName WRITE setDesktopName NOTIFY desktopNameChanged)
     Q_PROPERTY(int totalDesktops READ totalDesktops NOTIFY totalDesktopsChanged)
+    Q_PROPERTY(bool spatialMode READ spatialMode CONSTANT)
+    Q_PROPERTY(bool hasAbove READ hasAbove NOTIFY neighborsChanged)
+    Q_PROPERTY(bool hasBelow READ hasBelow NOTIFY neighborsChanged)
+    Q_PROPERTY(bool hasLeft  READ hasLeft  NOTIFY neighborsChanged)
+    Q_PROPERTY(bool hasRight READ hasRight NOTIFY neighborsChanged)
 public:
     explicit TileOverlayBridge(int desktop, QObject *parent = nullptr)
         : QObject(parent), m_desktop(desktop) {}
@@ -80,14 +85,37 @@ public:
             m_removeCallback();
     }
 
+    bool spatialMode() const {
+        return static_cast<EffectsHandlerImpl*>(effects)->isSpatialMode();
+    }
+
+    bool hasAbove() const { return hasSpatialNeighbor(VirtualDesktopSpatialMap::Direction::Above); }
+    bool hasBelow() const { return hasSpatialNeighbor(VirtualDesktopSpatialMap::Direction::Below); }
+    bool hasLeft()  const { return hasSpatialNeighbor(VirtualDesktopSpatialMap::Direction::Left);  }
+    bool hasRight() const { return hasSpatialNeighbor(VirtualDesktopSpatialMap::Direction::Right); }
+
+    Q_INVOKABLE void addDesktopInDirection(const QString &direction) {
+        Q_EMIT addDesktopRequested(m_desktop, direction);
+    }
+
     void notifyDesktopNameChanged() { Q_EMIT desktopNameChanged(); }
     void notifyTotalDesktopsChanged() { Q_EMIT totalDesktopsChanged(); }
+    void notifyNeighborsChanged() { Q_EMIT neighborsChanged(); }
 
 Q_SIGNALS:
     void desktopNameChanged();
     void totalDesktopsChanged();
+    void neighborsChanged();
+    void addDesktopRequested(int desktop, const QString &direction);
 
 private:
+    bool hasSpatialNeighbor(VirtualDesktopSpatialMap::Direction dir) const {
+        VirtualDesktopManager *vds = VirtualDesktopManager::self();
+        const VirtualDesktop *vd = vds->desktopForX11Id(m_desktop);
+        if (!vd) return false;
+        return !vds->spatialMap().neighbor(vd->id(), dir).isEmpty();
+    }
+
     int m_desktop;
     std::function<void()> m_removeCallback;
 };
@@ -1578,6 +1606,8 @@ void DesktopGridEffect::createTileOverlays()
         const int desktop = i + 1;
         auto *bridge = new TileOverlayBridge(desktop, this);
         bridge->setRemoveCallback([this, desktop]() { slotRemoveSpecificDesktop(desktop); });
+        connect(bridge, &TileOverlayBridge::addDesktopRequested,
+                this, &DesktopGridEffect::slotAddDesktopInDirection);
         m_tileBridges.append(bridge);
 
         auto *view = new OffscreenQuickScene(this);
@@ -1651,6 +1681,47 @@ void DesktopGridEffect::updateTileOverlayGeometry()
                              QSize(qRound(tileSize.width()), qRound(tileSize.height())));
         m_tileOverlays[i]->setGeometry(tileRect);
     }
+}
+
+void DesktopGridEffect::slotAddDesktopInDirection(int desktop, const QString &direction)
+{
+    VirtualDesktopManager *vds = VirtualDesktopManager::self();
+    const VirtualDesktop *fromVd = vds->desktopForX11Id(desktop);
+    if (!fromVd)
+        return;
+
+    VirtualDesktopSpatialMap::Direction dir, oppDir;
+    if (direction == QStringLiteral("above")) {
+        dir    = VirtualDesktopSpatialMap::Direction::Above;
+        oppDir = VirtualDesktopSpatialMap::Direction::Below;
+    } else if (direction == QStringLiteral("below")) {
+        dir    = VirtualDesktopSpatialMap::Direction::Below;
+        oppDir = VirtualDesktopSpatialMap::Direction::Above;
+    } else if (direction == QStringLiteral("left")) {
+        dir    = VirtualDesktopSpatialMap::Direction::Left;
+        oppDir = VirtualDesktopSpatialMap::Direction::Right;
+    } else if (direction == QStringLiteral("right")) {
+        dir    = VirtualDesktopSpatialMap::Direction::Right;
+        oppDir = VirtualDesktopSpatialMap::Direction::Left;
+    } else {
+        return;
+    }
+
+    // Create new desktop at the end. This synchronously fires slotNumberDesktopsChanged
+    // which rebuilds tiles (without neighbor info yet).
+    const VirtualDesktop *newVd = vds->createVirtualDesktop(vds->count());
+    if (!newVd)
+        return;
+
+    // Link the two desktops as spatial neighbors in both directions.
+    vds->spatialMap().setNeighbor(fromVd->id(), dir,    newVd->id());
+    vds->spatialMap().setNeighbor(newVd->id(),  oppDir, fromVd->id());
+
+    // Rebuild tiles now that the neighbor links are in place.
+    setupGrid();
+    destroyTileOverlays();
+    createTileOverlays();
+    effects->addRepaintFull();
 }
 
 } // namespace
