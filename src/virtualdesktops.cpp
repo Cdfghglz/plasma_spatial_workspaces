@@ -859,9 +859,24 @@ void VirtualDesktopManager::removeVirtualDesktop(VirtualDesktop *desktop)
         return;
     }
 
-    // Remove from all per-activity spatial maps before deleting
-    for (auto &smap : m_spatialMaps) {
-        smap.removeDesktop(desktop->id());
+    if (isActivityAwareSpatialMode()) {
+        // Only remove the desktop from the current activity's spatial map.
+        // If other activities still reference this desktop, preserve it
+        // globally — do not truly delete it.
+        activeSpatialMap().removeDesktop(desktop->id());
+        if (isDesktopInAnyActivityMap(desktop->id())) {
+            save();
+            updateSpatialLayout();
+            Q_EMIT spatialMapChanged();
+            return;
+        }
+        // No activity references this desktop any more; fall through to
+        // global deletion.
+    } else {
+        // Remove from all per-activity spatial maps before deleting.
+        for (auto &smap : m_spatialMaps) {
+            smap.removeDesktop(desktop->id());
+        }
     }
 
     const uint oldCurrent = m_current->x11DesktopNumber();
