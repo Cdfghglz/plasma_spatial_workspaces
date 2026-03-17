@@ -12,3 +12,9 @@
 .logs/
 __pycache__/
 state.json
+
+# Upstream KWin source package (local dev only, not part of the patch set)
+kwin-5.24.7/
+kwin_5.24.7-0ubuntu0.2.debian.tar.xz
+kwin_5.24.7-0ubuntu0.2.dsc
+kwin_5.24.7.orig.tar.xz
