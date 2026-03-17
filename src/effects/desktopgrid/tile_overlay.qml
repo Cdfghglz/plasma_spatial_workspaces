@@ -16,6 +16,14 @@ Item {
         acceptedButtons: Qt.NoButton
     }
 
+    // Aggregate hover: true if mouse is anywhere on the tile (including child MouseAreas)
+    property bool tileHovered: hoverArea.containsMouse
+                               || closeHover.containsMouse
+                               || aboveHover.containsMouse
+                               || belowHover.containsMouse
+                               || leftHover.containsMouse
+                               || rightHover.containsMouse
+
     Text {
         id: nameLabel
         anchors.centerIn: parent
@@ -51,31 +59,26 @@ Item {
         }
     }
 
-    // Double-click to rename: use a Timer to distinguish single vs double click.
-    // Single clicks must NOT be accepted so they propagate to C++ for desktop selection.
+    // Double-click to rename: single clicks pass through to C++ for desktop selection.
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton
-        property bool pendingDoubleClick: false
-        onPressed: {
-            pendingDoubleClick = false
-            mouse.accepted = false  // let C++ handle press immediately
-        }
+        onPressed: mouse.accepted = false
         onReleased: mouse.accepted = false
         onDoubleClicked: {
-            // Double-click triggers rename
             nameInput.text = bridge ? bridge.desktopName : ""
             nameInput.forceActiveFocus()
             nameInput.selectAll()
-            mouse.accepted = true  // consume the double-click
+            mouse.accepted = true
         }
     }
 
+    // Close button
     Rectangle {
         anchors { top: parent.top; right: parent.right; margins: 4 }
         width: 20; height: 20; radius: 10
         color: closeHover.containsMouse ? "#cc0000" : "#990000"
-        visible: hoverArea.containsMouse && bridge && bridge.totalDesktops > 1
+        visible: root.tileHovered && bridge && bridge.totalDesktops > 1
         Text {
             text: "×"
             anchors.centerIn: parent
@@ -93,56 +96,64 @@ Item {
         }
     }
 
-    // Spatial edge '+' buttons — visible in spatial mode when that edge has no neighbor
+    // Spatial edge '+' buttons — visible when that edge has no neighbor
 
     // Above
     Rectangle {
-        anchors { top: parent.top; horizontalCenter: parent.horizontalCenter }
+        anchors { top: parent.top; horizontalCenter: parent.horizontalCenter; topMargin: 8 }
         width: 24; height: 24; radius: 12
-        color: "#80000000"
-        visible: hoverArea.containsMouse && bridge && bridge.spatialMode && !bridge.hasAbove
+        color: aboveHover.containsMouse ? "#cc000000" : "#80000000"
+        visible: root.tileHovered && bridge && !bridge.hasAbove
         Text { text: "+"; anchors.centerIn: parent; color: "white"; font.pixelSize: 16; font.bold: true }
         MouseArea {
+            id: aboveHover
             anchors.fill: parent
+            hoverEnabled: true
             onClicked: if (bridge) bridge.addDesktopInDirection("above")
         }
     }
 
     // Below
     Rectangle {
-        anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter }
+        anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter; bottomMargin: 8 }
         width: 24; height: 24; radius: 12
-        color: "#80000000"
-        visible: hoverArea.containsMouse && bridge && bridge.spatialMode && !bridge.hasBelow
+        color: belowHover.containsMouse ? "#cc000000" : "#80000000"
+        visible: root.tileHovered && bridge && !bridge.hasBelow
         Text { text: "+"; anchors.centerIn: parent; color: "white"; font.pixelSize: 16; font.bold: true }
         MouseArea {
+            id: belowHover
             anchors.fill: parent
+            hoverEnabled: true
             onClicked: if (bridge) bridge.addDesktopInDirection("below")
         }
     }
 
     // Left
     Rectangle {
-        anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+        anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 8 }
         width: 24; height: 24; radius: 12
-        color: "#80000000"
-        visible: hoverArea.containsMouse && bridge && bridge.spatialMode && !bridge.hasLeft
+        color: leftHover.containsMouse ? "#cc000000" : "#80000000"
+        visible: root.tileHovered && bridge && !bridge.hasLeft
         Text { text: "+"; anchors.centerIn: parent; color: "white"; font.pixelSize: 16; font.bold: true }
         MouseArea {
+            id: leftHover
             anchors.fill: parent
+            hoverEnabled: true
             onClicked: if (bridge) bridge.addDesktopInDirection("left")
         }
     }
 
     // Right
     Rectangle {
-        anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+        anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: 8 }
         width: 24; height: 24; radius: 12
-        color: "#80000000"
-        visible: hoverArea.containsMouse && bridge && bridge.spatialMode && !bridge.hasRight
+        color: rightHover.containsMouse ? "#cc000000" : "#80000000"
+        visible: root.tileHovered && bridge && !bridge.hasRight
         Text { text: "+"; anchors.centerIn: parent; color: "white"; font.pixelSize: 16; font.bold: true }
         MouseArea {
+            id: rightHover
             anchors.fill: parent
+            hoverEnabled: true
             onClicked: if (bridge) bridge.addDesktopInDirection("right")
         }
     }

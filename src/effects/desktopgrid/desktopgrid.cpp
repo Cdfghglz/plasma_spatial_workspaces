@@ -1449,10 +1449,13 @@ void DesktopGridEffect::slotRemoveSpecificDesktop(int desktop)
             effects->windowToDesktop(w, targetDesktop);
     }
 
-    // 6. Remove the desktop — VirtualDesktopManager fires countChanged which
-    //    triggers slotNumberDesktopsChanged → desktopsRemoved → setupGrid +
-    //    destroyTileOverlays + createTileOverlays automatically.
-    vdm->removeVirtualDesktop(id);
+    // 6. Defer the actual removal to the next event loop iteration.
+    //    removeVirtualDesktop() fires slotNumberDesktopsChanged synchronously,
+    //    which destroys the tile overlays — including the bridge whose callback
+    //    we're currently executing. Deferring avoids use-after-free.
+    QMetaObject::invokeMethod(this, [vdm, id]() {
+        vdm->removeVirtualDesktop(id);
+    }, Qt::QueuedConnection);
 }
 
 void DesktopGridEffect::slotNumberDesktopsChanged(uint old)
@@ -1531,6 +1534,12 @@ void DesktopGridEffect::desktopsRemoved(int old)
             m_proxy->calculateWindowTransformations(manager.managedWindows(), screen, manager);
         }
     }
+
+    // Clamp desktop indices that may now be out of bounds.
+    if (highlightedDesktop > desktop)
+        highlightedDesktop = desktop;
+    if (sourceDesktop > desktop)
+        sourceDesktop = desktop;
 
     setupGrid();
     destroyTileOverlays();
