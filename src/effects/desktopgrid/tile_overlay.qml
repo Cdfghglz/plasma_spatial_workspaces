@@ -57,4 +57,26 @@ Item {
             nameInput.selectAll()
         }
     }
+
+    Rectangle {
+        anchors { top: parent.top; right: parent.right; margins: 4 }
+        width: 20; height: 20; radius: 10
+        color: closeHover.containsMouse ? "#cc0000" : "#990000"
+        visible: hoverArea.containsMouse && bridge && bridge.totalDesktops > 1
+        Text {
+            text: "×"
+            anchors.centerIn: parent
+            color: "white"
+            font.pixelSize: 12
+            font.bold: true
+        }
+        MouseArea {
+            id: closeHover
+            anchors.fill: parent
+            hoverEnabled: true
+            onClicked: {
+                if (bridge) bridge.removeDesktop()
+            }
+        }
+    }
 }

@@ -16,6 +16,9 @@
 
 // For spatial mode access
 #include "effects.h"
+#include "virtualdesktops.h"
+
+#include <functional>
 
 #include "../presentwindows/presentwindows_proxy.h"
 
@@ -62,11 +65,20 @@ public:
     void setDesktopName(const QString &name) {
         if (name == effects->desktopName(m_desktop))
             return;
-        effects->setDesktopName(m_desktop, name);
+        VirtualDesktop *vd = VirtualDesktopManager::self()->desktopForX11Id(m_desktop);
+        if (vd)
+            vd->setName(name);
         Q_EMIT desktopNameChanged();
     }
 
     int totalDesktops() const { return effects->numberOfDesktops(); }
+
+    void setRemoveCallback(std::function<void()> cb) { m_removeCallback = std::move(cb); }
+
+    Q_INVOKABLE void removeDesktop() {
+        if (m_removeCallback)
+            m_removeCallback();
+    }
 
     void notifyDesktopNameChanged() { Q_EMIT desktopNameChanged(); }
     void notifyTotalDesktopsChanged() { Q_EMIT totalDesktopsChanged(); }
@@ -77,6 +89,7 @@ Q_SIGNALS:
 
 private:
     int m_desktop;
+    std::function<void()> m_removeCallback;
 };
 
 // ---- DesktopGridEffect ----
@@ -1335,6 +1348,73 @@ void DesktopGridEffect::slotRemoveDesktop()
     effects->setNumberOfDesktops(effects->numberOfDesktops() - 1);
 }
 
+void DesktopGridEffect::slotRemoveSpecificDesktop(int desktop)
+{
+    if (effects->numberOfDesktops() <= 1)
+        return;
+
+    VirtualDesktopManager *vdm = VirtualDesktopManager::self();
+    VirtualDesktop *vd = vdm->desktopForX11Id(desktop);
+    if (!vd)
+        return;
+
+    const QString id = vd->id();
+
+    // 1. Gather spatial neighbors (empty string = no neighbor).
+    VirtualDesktopSpatialMap &smap = vdm->spatialMap();
+    using Dir = VirtualDesktopSpatialMap::Direction;
+    const QString leftId  = smap.neighbor(id, Dir::Left);
+    const QString rightId = smap.neighbor(id, Dir::Right);
+    const QString aboveId = smap.neighbor(id, Dir::Above);
+    const QString belowId = smap.neighbor(id, Dir::Below);
+
+    // 2. Stitch horizontal neighbors together.
+    if (!leftId.isEmpty() && !rightId.isEmpty()) {
+        smap.setNeighbor(leftId,  Dir::Right, rightId);
+        smap.setNeighbor(rightId, Dir::Left,  leftId);
+    } else if (!leftId.isEmpty()) {
+        smap.setNeighbor(leftId, Dir::Right, QString());
+    } else if (!rightId.isEmpty()) {
+        smap.setNeighbor(rightId, Dir::Left, QString());
+    }
+
+    // 3. Stitch vertical neighbors together.
+    if (!aboveId.isEmpty() && !belowId.isEmpty()) {
+        smap.setNeighbor(aboveId, Dir::Below, belowId);
+        smap.setNeighbor(belowId, Dir::Above, aboveId);
+    } else if (!aboveId.isEmpty()) {
+        smap.setNeighbor(aboveId, Dir::Below, QString());
+    } else if (!belowId.isEmpty()) {
+        smap.setNeighbor(belowId, Dir::Above, QString());
+    }
+
+    // 4. Choose a preferred neighbor to receive orphaned windows
+    //    (right > below > left > above > desktop 1).
+    auto findNeighborDesktop = [&]() -> int {
+        for (const QString &nid : {rightId, belowId, leftId, aboveId}) {
+            if (!nid.isEmpty()) {
+                VirtualDesktop *nd = vdm->desktopForId(nid);
+                if (nd)
+                    return nd->x11DesktopNumber();
+            }
+        }
+        return 1;
+    };
+    const int targetDesktop = findNeighborDesktop();
+
+    // 5. Move all windows from the deleted desktop to the target.
+    const auto windows = effects->stackingOrder();
+    for (EffectWindow *w : windows) {
+        if (!w->isOnAllDesktops() && w->isOnDesktop(desktop))
+            effects->windowToDesktop(w, targetDesktop);
+    }
+
+    // 6. Remove the desktop — VirtualDesktopManager fires countChanged which
+    //    triggers slotNumberDesktopsChanged → desktopsRemoved → setupGrid +
+    //    destroyTileOverlays + createTileOverlays automatically.
+    vdm->removeVirtualDesktop(id);
+}
+
 void DesktopGridEffect::slotNumberDesktopsChanged(uint old)
 {
     if (!activated)
@@ -1497,6 +1577,7 @@ void DesktopGridEffect::createTileOverlays()
     for (int i = 0; i < n; ++i) {
         const int desktop = i + 1;
         auto *bridge = new TileOverlayBridge(desktop, this);
+        bridge->setRemoveCallback([this, desktop]() { slotRemoveSpecificDesktop(desktop); });
         m_tileBridges.append(bridge);
 
         auto *view = new OffscreenQuickScene(this);

@@ -89,6 +89,7 @@ private Q_SLOTS:
     void globalShortcutChanged(QAction *action, const QKeySequence& seq);
     void slotAddDesktop();
     void slotRemoveDesktop();
+    void slotRemoveSpecificDesktop(int desktop);
     void slotWindowAdded(KWin::EffectWindow* w);
     void slotWindowClosed(KWin::EffectWindow *w);
     void slotWindowDeleted(KWin::EffectWindow *w);
