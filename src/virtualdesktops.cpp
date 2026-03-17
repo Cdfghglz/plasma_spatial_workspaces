@@ -19,6 +19,7 @@
 #include <KWaylandServer/plasmavirtualdesktop_interface.h>
 // Qt
 #include <QAction>
+#include <QDir>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -484,6 +485,9 @@ void VirtualDesktopManager::initActivities()
 void VirtualDesktopManager::slotActivityRemoved(const QString &activityId)
 {
     m_spatialMaps.remove(activityId);
+    const QString path = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
+        + QStringLiteral("/spatial-desktop-nav-") + activityId + QStringLiteral(".json");
+    QFile::remove(path);
 }
 
 void VirtualDesktopManager::setRootInfo(NETRootInfo *info)
@@ -1031,9 +1035,22 @@ void VirtualDesktopManager::load()
     m_spatialMaps[defaultActivityKey()].load(group);
 
     // JSON file takes precedence over kwinrc entries when present.
-    const QString jsonPath = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
-        + QStringLiteral("/spatial-desktop-nav.json");
-    m_spatialMaps[defaultActivityKey()].loadJson(jsonPath);
+    const QString configDir = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation);
+    m_spatialMaps[defaultActivityKey()].loadJson(configDir + QStringLiteral("/spatial-desktop-nav.json"));
+
+    // Load per-activity spatial maps from individual JSON files.
+    const QDir dir(configDir);
+    const QString activityFilePrefix = QStringLiteral("spatial-desktop-nav-");
+    const QStringList activityFiles = dir.entryList(
+        QStringList() << activityFilePrefix + QStringLiteral("*.json"), QDir::Files);
+    for (const QString &fileName : activityFiles) {
+        const QString activityId = fileName.mid(
+            activityFilePrefix.length(),
+            fileName.length() - activityFilePrefix.length() - 5); // strip prefix and ".json"
+        if (!activityId.isEmpty()) {
+            m_spatialMaps[activityId].loadJson(configDir + QLatin1Char('/') + fileName);
+        }
+    }
 
     s_loadingDesktopSettings = false;
 
@@ -1083,16 +1100,26 @@ void VirtualDesktopManager::save()
 
     group.writeEntry("Rows", m_rows);
     group.writeEntry("SpatialMode", m_spatialMode);
-    activeSpatialMap().save(group, knownIds);
+    m_spatialMaps[defaultActivityKey()].save(group, knownIds);
 
     // Save to disk
     group.sync();
 
-    // Also persist the spatial neighbor map to a standalone JSON file so that
-    // external tools and the KWin scripting layer can read and write it easily.
-    const QString jsonPath = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
-        + QStringLiteral("/spatial-desktop-nav.json");
-    activeSpatialMap().saveJson(jsonPath, knownIds);
+    // Persist spatial neighbor maps to JSON files.
+    // The default/global map goes to the legacy file for backward compatibility.
+    // Each per-activity map gets its own file: spatial-desktop-nav-<activity-id>.json.
+    const QString configDir = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation);
+    m_spatialMaps[defaultActivityKey()].saveJson(
+        configDir + QStringLiteral("/spatial-desktop-nav.json"), knownIds);
+
+    for (auto it = m_spatialMaps.constBegin(); it != m_spatialMaps.constEnd(); ++it) {
+        if (it.key() == defaultActivityKey()) {
+            continue;
+        }
+        const QString path = configDir + QStringLiteral("/spatial-desktop-nav-")
+            + it.key() + QStringLiteral(".json");
+        it.value().saveJson(path, knownIds);
+    }
 }
 
 void VirtualDesktopManager::setSpatialMode(bool enabled)
