@@ -1722,7 +1722,9 @@ void DesktopGridEffect::createTileOverlays()
             continue;
         }
 
-        view->show();
+        // Don't show() yet — defer until updateTileOverlayGeometry() confirms
+        // non-zero dimensions. Calling show() before geometry is set can
+        // trigger a CreatePixmap BadValue X11 error on zero-size surfaces.
         m_tileOverlays.append(view);
     }
 
@@ -1784,11 +1786,23 @@ void DesktopGridEffect::updateTileOverlayGeometry()
         const QRect tileRect(tl.toPoint(),
                              QSize(qRound(tileSize.width()), qRound(tileSize.height())));
 
+        // Guard against zero-dimension rects: showing a surface with zero width
+        // or height triggers a CreatePixmap BadValue X11 error.  This can happen
+        // transiently when geometry hasn't been computed yet (e.g. scaledSize is
+        // still zero during the first paint after createTileOverlays()).
+        if (tileRect.width() < 1 || tileRect.height() < 1)
+            continue;
+
         // Only call setGeometry when the rect actually changed to avoid
         // triggering repaintNeeded → addRepaintFull() on every paint frame.
         if (m_tileOverlays[i]->geometry() != tileRect) {
             m_tileOverlays[i]->setGeometry(tileRect);
         }
+
+        // Deferred show(): now that we have confirmed non-zero geometry, it is
+        // safe to make the view visible.  show() is idempotent — calling it on
+        // an already-visible view is a no-op.
+        m_tileOverlays[i]->show();
     }
 }
 
