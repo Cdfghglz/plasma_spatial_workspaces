@@ -180,6 +180,7 @@ private:
     QVector<OffscreenQuickScene*> m_tileOverlays;
     QVector<TileOverlayBridge*> m_tileBridges;
     OffscreenQuickScene *m_editingTileOverlay = nullptr; // overlay with active TextInput
+    bool m_tileOverlayGeometryDirty = false; // set when grid/overlays change, cleared after update
 
     QAction *m_gestureAction;
     QAction *m_shortcutAction;

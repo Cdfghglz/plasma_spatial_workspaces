@@ -16,13 +16,12 @@ Item {
         acceptedButtons: Qt.NoButton
     }
 
-    // Aggregate hover: true if mouse is anywhere on the tile (including child MouseAreas)
+    // Hover state for the whole tile.  Only the full-surface hoverArea drives
+    // this — child button MouseAreas sit *inside* hoverArea so they cannot
+    // produce containsMouse=true without hoverArea also being true.  Referring
+    // to the child hover states here caused a binding loop (tileHovered →
+    // button visible → MouseArea geometry → containsMouse → tileHovered).
     property bool tileHovered: hoverArea.containsMouse
-                               || closeHover.containsMouse
-                               || aboveHover.containsMouse
-                               || belowHover.containsMouse
-                               || leftHover.containsMouse
-                               || rightHover.containsMouse
 
     Text {
         id: nameLabel

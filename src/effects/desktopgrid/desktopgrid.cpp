@@ -42,6 +42,9 @@
 namespace KWin
 {
 
+// PSW_DEBUG: file-scope counter for paint diagnostics (reset in activate())
+static int s_pswPaintLogCount = 0;
+
 // WARNING, TODO: This effect relies on the desktop layout being EWMH-compliant.
 
 // ---- TileOverlayBridge ----
@@ -350,6 +353,30 @@ void DesktopGridEffect::paintScreen(int mask, const QRegion &region, ScreenPaint
     const bool activityAwareSpatial = vdm->isActivityAwareSpatialMode();
     const VirtualDesktopSpatialMap &paintSmap = vdm->spatialMap();
     const bool spatialMapNonEmpty = activityAwareSpatial && !paintSmap.isEmpty();
+
+    // PSW_DEBUG: log once per activation cycle to diagnose activity isolation
+    if (s_pswPaintLogCount < 3) {
+        s_pswPaintLogCount++;
+        int mapCount = 0;
+        for (int d = 1; d <= effects->numberOfDesktops(); d++) {
+            VirtualDesktop *vd = vdm->desktopForX11Id(d);
+            if (vd && paintSmap.containsDesktop(vd->id())) mapCount++;
+        }
+        qWarning() << "PSW_PAINT: activityAware=" << activityAwareSpatial
+                    << "mapEmpty=" << paintSmap.isEmpty()
+                    << "mapCount=" << mapCount
+                    << "totalDesktops=" << effects->numberOfDesktops()
+                    << "gridSize=" << effects->desktopGridSize();
+        for (int d = 1; d <= effects->numberOfDesktops(); d++) {
+            VirtualDesktop *vd = vdm->desktopForX11Id(d);
+            if (vd) {
+                bool inMap = paintSmap.containsDesktop(vd->id());
+                qWarning() << "  PSW_PAINT: desktop" << d << vd->id().left(8)
+                           << "inMap=" << inMap;
+            }
+        }
+    }
+
     for (int desktop = 1; desktop <= effects->numberOfDesktops(); desktop++) {
         // In activity-aware spatial mode, skip desktops that are not part of the
         // current activity's spatial map (they are hidden from this activity).
@@ -366,10 +393,16 @@ void DesktopGridEffect::paintScreen(int mask, const QRegion &region, ScreenPaint
 
     // Render per-tile overlays (desktop names + inline rename)
     if (!m_tileOverlays.isEmpty()) {
-        updateTileOverlayGeometry();
+        // Geometry is stable once the grid is laid out — only update when
+        // the dirty flag is set (e.g. after setupGrid / createTileOverlays).
+        if (m_tileOverlayGeometryDirty) {
+            updateTileOverlayGeometry();
+            m_tileOverlayGeometryDirty = false;
+        }
         const qreal opacity = timeline.currentValue();
         for (OffscreenQuickScene *view : qAsConst(m_tileOverlays)) {
-            view->rootItem()->setOpacity(opacity);
+            if (view->rootItem()->opacity() != opacity)
+                view->rootItem()->setOpacity(opacity);
             effects->renderOffscreenQuickView(view);
         }
     }
@@ -796,6 +829,8 @@ void DesktopGridEffect::windowInputMouseEvent(QEvent* e)
 void DesktopGridEffect::activate()
 {
     activated = true;
+    // PSW_DEBUG: reset paint log counter for fresh diagnostics each activation
+    s_pswPaintLogCount = 0;
     setup();
     timeline.setDirection(QTimeLine::Forward);
     timelineRunning = true;
@@ -1303,6 +1338,7 @@ void DesktopGridEffect::setupGrid()
         scaledSize[screen] = size;
         scaledOffset[screen] = offset;
     }
+    m_tileOverlayGeometryDirty = true;
 }
 
 void DesktopGridEffect::finish()
@@ -1453,12 +1489,20 @@ void DesktopGridEffect::slotRemoveSpecificDesktop(int desktop)
     //    removeVirtualDesktop fires slotNumberDesktopsChanged (→ desktopsRemoved →
     //    destroyTileOverlays). Either would destroy the bridge whose callback is
     //    currently executing.
+    qWarning() << "PSW_DEBUG desktopgrid deleteDesktop:" << id
+               << "isActivityAware:" << vdm->isActivityAwareSpatialMode();
     if (vdm->isActivityAwareSpatialMode()) {
         QMetaObject::invokeMethod(this, [vdm, id]() {
+            qWarning() << "PSW_DEBUG desktopgrid deferred: removeDesktopFromCurrentActivityMap" << id;
             vdm->removeDesktopFromCurrentActivityMap(id);
+            const bool inAny = vdm->isDesktopInAnyActivityMap(id);
+            qWarning() << "PSW_DEBUG desktopgrid deferred: inAnyMap=" << inAny;
             // If no activity still references this desktop, truly delete it.
-            if (!vdm->isDesktopInAnyActivityMap(id)) {
+            if (!inAny) {
+                qWarning() << "PSW_DEBUG desktopgrid: globally deleting" << id;
                 vdm->removeVirtualDesktop(id);
+            } else {
+                qWarning() << "PSW_DEBUG desktopgrid: preserved globally, only removed from current activity";
             }
         }, Qt::QueuedConnection);
         return;
@@ -1715,6 +1759,7 @@ void DesktopGridEffect::createTileOverlays()
         m_tileOverlays.append(view);
     }
 
+    m_tileOverlayGeometryDirty = true;
     updateTileOverlayGeometry();
 }
 
@@ -1746,7 +1791,12 @@ void DesktopGridEffect::updateTileOverlayGeometry()
     const QSizeF  tileSize = scaledSize[screen];
 
     for (int i = 0; i < m_tileOverlays.count(); ++i) {
-        const int desktop = i + 1;
+        // Each overlay's bridge stores the actual desktop number (1-based),
+        // which may differ from i+1 when desktops are skipped for activity
+        // filtering in createTileOverlays().
+        const int desktop = (i < m_tileBridges.count())
+            ? m_tileBridges[i]->desktop()
+            : i + 1;
 
         // Compute 1-based grid cell for this desktop
         QPoint cell;
@@ -1766,7 +1816,12 @@ void DesktopGridEffect::updateTileOverlayGeometry()
             offset.y() + (cell.y() - 1) * (tileSize.height() + m_effectiveBorder));
         const QRect tileRect(tl.toPoint(),
                              QSize(qRound(tileSize.width()), qRound(tileSize.height())));
-        m_tileOverlays[i]->setGeometry(tileRect);
+
+        // Only call setGeometry when the rect actually changed to avoid
+        // triggering repaintNeeded → addRepaintFull() on every paint frame.
+        if (m_tileOverlays[i]->geometry() != tileRect) {
+            m_tileOverlays[i]->setGeometry(tileRect);
+        }
     }
 }
 

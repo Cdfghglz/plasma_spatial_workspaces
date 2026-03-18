@@ -83,12 +83,19 @@ private:
  * a Pager. This grid is used for getting a desktop next to a given desktop in any direction by
  * making use of the layout information. This allows navigation like move to desktop on left.
  */
+class VirtualDesktopSpatialMap; // forward declaration for updateFromSpatialMap
+
 class VirtualDesktopGrid
 {
 public:
     VirtualDesktopGrid();
     ~VirtualDesktopGrid();
     void update(const QSize &size, Qt::Orientation orientation, const QVector<VirtualDesktop*> &desktops);
+    /**
+     * Builds the grid from a spatial neighbor map by walking the graph.
+     * Desktops are placed at their spatial positions; empty cells are nullptr.
+     */
+    void updateFromSpatialMap(const VirtualDesktopSpatialMap &spatialMap, const QVector<VirtualDesktop*> &desktops);
     /**
      * @returns The coords of desktop @a id in grid units.
      */
