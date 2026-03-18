@@ -975,24 +975,12 @@ void VirtualDesktopManager::removeVirtualDesktop(VirtualDesktop *desktop)
         return;
     }
 
-    qWarning() << "PSW_DEBUG removeVirtualDesktop:" << desktop->id()
-               << "isActivityAware:" << isActivityAwareSpatialMode()
-               << "Activities::self:" << (Activities::self() != nullptr)
-               << "spatialMode:" << m_spatialMode;
-
     if (isActivityAwareSpatialMode()) {
-        const QString currentActivity = Activities::self() ? Activities::self()->current() : QStringLiteral("(null)");
-        qWarning() << "PSW_DEBUG activity-aware path, currentActivity:" << currentActivity
-                   << "maps count:" << m_spatialMaps.count();
         // Only remove the desktop from the current activity's spatial map.
         // If other activities still reference this desktop, preserve it
         // globally — do not truly delete it.
         activeSpatialMap().removeDesktop(desktop->id());
         const bool inAnyMap = isDesktopInAnyActivityMap(desktop->id());
-        qWarning() << "PSW_DEBUG after removeDesktop from active map, inAnyMap:" << inAnyMap;
-        for (auto it = m_spatialMaps.constBegin(); it != m_spatialMaps.constEnd(); ++it) {
-            qWarning() << "PSW_DEBUG   map" << it.key() << "containsDesktop:" << it.value().containsDesktop(desktop->id());
-        }
         if (inAnyMap) {
             save();
             updateSpatialLayout();

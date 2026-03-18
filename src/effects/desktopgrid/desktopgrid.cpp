@@ -42,9 +42,6 @@
 namespace KWin
 {
 
-// PSW_DEBUG: file-scope counter for paint diagnostics (reset in activate())
-static int s_pswPaintLogCount = 0;
-
 // WARNING, TODO: This effect relies on the desktop layout being EWMH-compliant.
 
 // ---- TileOverlayBridge ----
@@ -353,29 +350,6 @@ void DesktopGridEffect::paintScreen(int mask, const QRegion &region, ScreenPaint
     const bool activityAwareSpatial = vdm->isActivityAwareSpatialMode();
     const VirtualDesktopSpatialMap &paintSmap = vdm->spatialMap();
     const bool spatialMapNonEmpty = activityAwareSpatial && !paintSmap.isEmpty();
-
-    // PSW_DEBUG: log once per activation cycle to diagnose activity isolation
-    if (s_pswPaintLogCount < 3) {
-        s_pswPaintLogCount++;
-        int mapCount = 0;
-        for (int d = 1; d <= effects->numberOfDesktops(); d++) {
-            VirtualDesktop *vd = vdm->desktopForX11Id(d);
-            if (vd && paintSmap.containsDesktop(vd->id())) mapCount++;
-        }
-        qWarning() << "PSW_PAINT: activityAware=" << activityAwareSpatial
-                    << "mapEmpty=" << paintSmap.isEmpty()
-                    << "mapCount=" << mapCount
-                    << "totalDesktops=" << effects->numberOfDesktops()
-                    << "gridSize=" << effects->desktopGridSize();
-        for (int d = 1; d <= effects->numberOfDesktops(); d++) {
-            VirtualDesktop *vd = vdm->desktopForX11Id(d);
-            if (vd) {
-                bool inMap = paintSmap.containsDesktop(vd->id());
-                qWarning() << "  PSW_PAINT: desktop" << d << vd->id().left(8)
-                           << "inMap=" << inMap;
-            }
-        }
-    }
 
     for (int desktop = 1; desktop <= effects->numberOfDesktops(); desktop++) {
         // In activity-aware spatial mode, skip desktops that are not part of the
@@ -829,8 +803,6 @@ void DesktopGridEffect::windowInputMouseEvent(QEvent* e)
 void DesktopGridEffect::activate()
 {
     activated = true;
-    // PSW_DEBUG: reset paint log counter for fresh diagnostics each activation
-    s_pswPaintLogCount = 0;
     setup();
     timeline.setDirection(QTimeLine::Forward);
     timelineRunning = true;
@@ -1489,20 +1461,12 @@ void DesktopGridEffect::slotRemoveSpecificDesktop(int desktop)
     //    removeVirtualDesktop fires slotNumberDesktopsChanged (→ desktopsRemoved →
     //    destroyTileOverlays). Either would destroy the bridge whose callback is
     //    currently executing.
-    qWarning() << "PSW_DEBUG desktopgrid deleteDesktop:" << id
-               << "isActivityAware:" << vdm->isActivityAwareSpatialMode();
     if (vdm->isActivityAwareSpatialMode()) {
         QMetaObject::invokeMethod(this, [vdm, id]() {
-            qWarning() << "PSW_DEBUG desktopgrid deferred: removeDesktopFromCurrentActivityMap" << id;
             vdm->removeDesktopFromCurrentActivityMap(id);
-            const bool inAny = vdm->isDesktopInAnyActivityMap(id);
-            qWarning() << "PSW_DEBUG desktopgrid deferred: inAnyMap=" << inAny;
             // If no activity still references this desktop, truly delete it.
-            if (!inAny) {
-                qWarning() << "PSW_DEBUG desktopgrid: globally deleting" << id;
+            if (!vdm->isDesktopInAnyActivityMap(id)) {
                 vdm->removeVirtualDesktop(id);
-            } else {
-                qWarning() << "PSW_DEBUG desktopgrid: preserved globally, only removed from current activity";
             }
         }, Qt::QueuedConnection);
         return;
