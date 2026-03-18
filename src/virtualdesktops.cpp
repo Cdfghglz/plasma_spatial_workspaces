@@ -1460,8 +1460,62 @@ void VirtualDesktopManager::updateSpatialLayout()
         }
     }
 
+    // Normalize so the top-left position is (0, 0).
+    for (auto it = positions.begin(); it != positions.end(); ++it) {
+        it.value() -= QPoint(minCol, minRow);
+    }
+
     const uint columns = static_cast<uint>(maxCol - minCol + 1);
     const uint rows    = static_cast<uint>(maxRow - minRow + 1);
+
+    // Renumber desktops so their X11 numbers match the spatial grid positions
+    // in row-major order.  The pager reads _NET_DESKTOP_LAYOUT as a dense grid
+    // and places desktop N at linear position N-1, so desktop 1 maps to (0,0),
+    // desktop 2 to (1,0), etc.  If the X11 numbers don't match the spatial
+    // positions the pager will show desktop 10 under desktop 7 instead of
+    // under its actual spatial neighbour.
+    //
+    // Sort positioned desktops by (row, col), assign them X11 numbers 1..K,
+    // then append any unpositioned desktops with the remaining numbers.
+    QVector<VirtualDesktop *> sorted;
+    sorted.reserve(m_desktops.size());
+
+    // Collect positioned desktops and sort by (row, col).
+    QVector<QPair<QPoint, VirtualDesktop *>> positioned;
+    positioned.reserve(positions.size());
+    for (auto it = positions.constBegin(); it != positions.constEnd(); ++it) {
+        VirtualDesktop *vd = desktopForId(it.key());
+        if (vd) {
+            positioned.append({it.value(), vd});
+        }
+    }
+    std::sort(positioned.begin(), positioned.end(),
+              [](const QPair<QPoint, VirtualDesktop *> &a, const QPair<QPoint, VirtualDesktop *> &b) {
+                  if (a.first.y() != b.first.y()) {
+                      return a.first.y() < b.first.y();
+                  }
+                  return a.first.x() < b.first.x();
+              });
+    for (const auto &pair : qAsConst(positioned)) {
+        sorted.append(pair.second);
+    }
+
+    // Append desktops that are not in the spatial map (other activities, etc.).
+    for (auto *vd : qAsConst(m_desktops)) {
+        if (!positions.contains(vd->id())) {
+            sorted.append(vd);
+        }
+    }
+
+    // Apply new ordering: update m_desktops, assign X11 numbers, and
+    // notify rootInfo of the new desktop names.
+    m_desktops = sorted;
+    for (int i = 0; i < m_desktops.size(); ++i) {
+        m_desktops[i]->setX11DesktopNumber(i + 1);
+        if (m_rootInfo) {
+            m_rootInfo->setDesktopName(i + 1, m_desktops[i]->name().toUtf8().data());
+        }
+    }
 
     m_rootInfo->setDesktopLayout(NET::OrientationHorizontal, columns, rows, NET::DesktopLayoutCornerTopLeft);
     m_rootInfo->activate();
