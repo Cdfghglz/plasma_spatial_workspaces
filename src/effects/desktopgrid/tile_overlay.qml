@@ -16,12 +16,20 @@ Item {
         acceptedButtons: Qt.NoButton
     }
 
-    // Hover state for the whole tile.  Only the full-surface hoverArea drives
-    // this — child button MouseAreas sit *inside* hoverArea so they cannot
-    // produce containsMouse=true without hoverArea also being true.  Referring
-    // to the child hover states here caused a binding loop (tileHovered →
-    // button visible → MouseArea geometry → containsMouse → tileHovered).
+    // Aggregate hover: true when the mouse is anywhere on the tile or its buttons.
+    // Child button MouseAreas are siblings of hoverArea in z-order and steal
+    // hover events from it, so hoverArea.containsMouse alone causes flicker
+    // (mouse→button → hoverArea loses hover → button hides → hoverArea regains
+    // hover → loop).  Including each button's containsMouse here fixes that.
+    // The previous binding-loop risk (tileHovered → button visible → geometry →
+    // containsMouse → tileHovered) is eliminated by driving button visibility
+    // with opacity instead of visible, so geometry never changes on hover.
     property bool tileHovered: hoverArea.containsMouse
+                               || closeHover.containsMouse
+                               || aboveHover.containsMouse
+                               || belowHover.containsMouse
+                               || leftHover.containsMouse
+                               || rightHover.containsMouse
 
     Text {
         id: nameLabel
@@ -77,7 +85,8 @@ Item {
         anchors { top: parent.top; right: parent.right; margins: 4 }
         width: 20; height: 20; radius: 10
         color: closeHover.containsMouse ? "#cc0000" : "#990000"
-        visible: root.tileHovered && bridge && bridge.totalDesktops > 1
+        visible: bridge && bridge.totalDesktops > 1
+        opacity: root.tileHovered ? 1.0 : 0.0
         Text {
             text: "×"
             anchors.centerIn: parent
@@ -102,7 +111,8 @@ Item {
         anchors { top: parent.top; horizontalCenter: parent.horizontalCenter; topMargin: 8 }
         width: 24; height: 24; radius: 12
         color: aboveHover.containsMouse ? "#cc000000" : "#80000000"
-        visible: root.tileHovered && bridge && !bridge.hasAbove
+        visible: bridge && !bridge.hasAbove
+        opacity: root.tileHovered ? 1.0 : 0.0
         Text { text: "+"; anchors.centerIn: parent; color: "white"; font.pixelSize: 16; font.bold: true }
         MouseArea {
             id: aboveHover
@@ -117,7 +127,8 @@ Item {
         anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter; bottomMargin: 8 }
         width: 24; height: 24; radius: 12
         color: belowHover.containsMouse ? "#cc000000" : "#80000000"
-        visible: root.tileHovered && bridge && !bridge.hasBelow
+        visible: bridge && !bridge.hasBelow
+        opacity: root.tileHovered ? 1.0 : 0.0
         Text { text: "+"; anchors.centerIn: parent; color: "white"; font.pixelSize: 16; font.bold: true }
         MouseArea {
             id: belowHover
@@ -132,7 +143,8 @@ Item {
         anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 8 }
         width: 24; height: 24; radius: 12
         color: leftHover.containsMouse ? "#cc000000" : "#80000000"
-        visible: root.tileHovered && bridge && !bridge.hasLeft
+        visible: bridge && !bridge.hasLeft
+        opacity: root.tileHovered ? 1.0 : 0.0
         Text { text: "+"; anchors.centerIn: parent; color: "white"; font.pixelSize: 16; font.bold: true }
         MouseArea {
             id: leftHover
@@ -147,7 +159,8 @@ Item {
         anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: 8 }
         width: 24; height: 24; radius: 12
         color: rightHover.containsMouse ? "#cc000000" : "#80000000"
-        visible: root.tileHovered && bridge && !bridge.hasRight
+        visible: bridge && !bridge.hasRight
+        opacity: root.tileHovered ? 1.0 : 0.0
         Text { text: "+"; anchors.centerIn: parent; color: "white"; font.pixelSize: 16; font.bold: true }
         MouseArea {
             id: rightHover
