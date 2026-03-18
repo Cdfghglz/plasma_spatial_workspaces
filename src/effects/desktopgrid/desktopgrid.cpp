@@ -1291,11 +1291,9 @@ void DesktopGridEffect::setupGrid()
     const QList<EffectScreen *> screens = effects->screens();
     for (EffectScreen *screen : screens) {
         QRect geom = effects->clientArea(ScreenArea, screen, effects->currentDesktop());
-        double sScale;
-        if (gridSize.width() > gridSize.height())
-            sScale = (geom.width() - m_effectiveBorder * (gridSize.width() + 1)) / double(geom.width() * gridSize.width());
-        else
-            sScale = (geom.height() - m_effectiveBorder * (gridSize.height() + 1)) / double(geom.height() * gridSize.height());
+        double sScaleX = (geom.width() - m_effectiveBorder * (gridSize.width() + 1)) / double(geom.width() * gridSize.width());
+        double sScaleY = (geom.height() - m_effectiveBorder * (gridSize.height() + 1)) / double(geom.height() * gridSize.height());
+        double sScale = qMin(sScaleX, sScaleY);
         double sBorder = m_effectiveBorder / sScale;
         QSizeF size(
             double(geom.width()) * sScale,
