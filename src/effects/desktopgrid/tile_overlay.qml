@@ -47,12 +47,14 @@ Item {
         id: nameInput
         anchors.centerIn: parent
         width: parent.width - 16
-        text: bridge ? bridge.desktopName : ""
         color: "white"
         font.pixelSize: 14
         font.bold: true
         horizontalAlignment: TextInput.AlignHCenter
         visible: activeFocus
+        Component.onCompleted: {
+            if (bridge) text = bridge.desktopName
+        }
         onActiveFocusChanged: {
             if (bridge) bridge.setEditing(activeFocus)
         }
@@ -63,6 +65,13 @@ Item {
         Keys.onEscapePressed: {
             if (bridge) text = bridge.desktopName
             focus = false
+        }
+    }
+
+    Connections {
+        target: bridge
+        function onDesktopNameChanged() {
+            if (!nameInput.activeFocus) nameInput.text = bridge.desktopName
         }
     }
 
