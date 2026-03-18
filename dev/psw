@@ -1,0 +1,360 @@
+#!/usr/bin/env bash
+# psw - Plasma Spatial Workspaces dev tool
+#
+# Wraps build, check, deploy, and test workflows for kwin-dev.
+# Catches the vtable crash class caused by system KWinX11Platform.so being loaded
+# when QT_PLUGIN_PATH is not set.
+#
+# USAGE:
+#   psw build    Build and install kwin to ~/.local/kwin-dev/
+#   psw check    Verify kwin is using patched .so files (not system ones)
+#   psw deploy   Restart kwin with correct QT_PLUGIN_PATH, verify compositing
+#   psw test     Smoke test: trigger desktop grid, navigate, verify no crash
+#
+# INSTALL:
+#   ln -s "$(realpath "$0")" ~/.local/bin/psw
+#
+# EXAMPLE WORKFLOW:
+#   psw build    # Rebuild after patching
+#   psw deploy   # Restart kwin with new build
+#   psw check    # Verify correct libs loaded
+#   psw test     # Smoke test
+
+set -euo pipefail
+
+BUILD_DIR="${HOME}/ws/kwin-dev/build"
+INSTALL_PREFIX="${HOME}/.local/kwin-dev"
+PLUGIN_PATH="${INSTALL_PREFIX}/lib/x86_64-linux-gnu/plugins"
+KWIN_BIN="${INSTALL_PREFIX}/bin/kwin_x11"
+RESTART_SCRIPT="${HOME}/scripts/restart_plasma_kwin.sh"
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+ok()   { echo "  [OK]   $*"; }
+fail() { echo "  [FAIL] $*" >&2; }
+warn() { echo "  [WARN] $*"; }
+info() { echo "  $*"; }
+
+# ─── psw build ────────────────────────────────────────────────────────────────
+
+cmd_build() {
+    if [[ ! -d "${BUILD_DIR}" ]]; then
+        echo "ERROR: Build dir not found: ${BUILD_DIR}" >&2
+        echo "       Run dev/setup-kwin-build.sh first." >&2
+        return 1
+    fi
+
+    echo "==> Building kwin ($(nproc) jobs)..."
+    cmake --build "${BUILD_DIR}" -j"$(nproc)"
+
+    echo "==> Installing to ${INSTALL_PREFIX}..."
+    cmake --install "${BUILD_DIR}"
+
+    echo "==> Build complete."
+    echo "    Binary: ${KWIN_BIN}"
+    echo "    Plugin: ${PLUGIN_PATH}/org.kde.kwin.platforms/KWinX11Platform.so"
+}
+
+# ─── psw check ────────────────────────────────────────────────────────────────
+
+cmd_check() {
+    local kwin_pid
+    kwin_pid=$(pgrep -x kwin_x11 2>/dev/null | head -1 || true)
+    if [[ -z "${kwin_pid}" ]]; then
+        echo "ERROR: kwin_x11 is not running." >&2
+        return 1
+    fi
+
+    local maps_file="/proc/${kwin_pid}/maps"
+    if [[ ! -r "${maps_file}" ]]; then
+        echo "ERROR: Cannot read ${maps_file} (need same-uid kwin or root)" >&2
+        return 1
+    fi
+
+    echo "==> Checking kwin_x11 PID ${kwin_pid} loaded libraries..."
+
+    # Extract unique .so paths from /proc/PID/maps
+    local -a patched_libs=()
+    local -a kwin_system_libs=()
+
+    while IFS= read -r path; do
+        if [[ "${path}" == "${INSTALL_PREFIX}"* ]]; then
+            patched_libs+=("${path}")
+        elif [[ "${path}" == /usr/lib* ]] && \
+             { [[ "${path}" == *libkwin* ]] || [[ "${path}" == *KWinX11Platform* ]] || \
+               [[ "${path}" == */kwin/plugins/* ]]; }; then
+            # kwindowsystem is a separate KDE Frameworks lib — only flag actual kwin libs
+            kwin_system_libs+=("${path}")
+        fi
+    done < <(awk '$6 ~ /\.so/ {print $6}' "${maps_file}" | sort -u)
+
+    echo ""
+    echo "  Patched libs loaded from ${INSTALL_PREFIX}:"
+    if [[ ${#patched_libs[@]} -eq 0 ]]; then
+        info "(none)"
+    else
+        printf '    %s\n' "${patched_libs[@]}"
+    fi
+
+    echo ""
+    echo "  System kwin libs that may conflict (from /usr/lib):"
+    if [[ ${#kwin_system_libs[@]} -eq 0 ]]; then
+        info "(none — good)"
+    else
+        printf '    %s\n' "${kwin_system_libs[@]}"
+    fi
+
+    echo ""
+    local exit_code=0
+
+    # Critical check: KWinX11Platform.so must come from patched installation
+    local platform_ok=false
+    for lib in "${patched_libs[@]}"; do
+        if [[ "${lib}" == *"KWinX11Platform.so" ]]; then
+            platform_ok=true
+            break
+        fi
+    done
+
+    if ${platform_ok}; then
+        ok "KWinX11Platform.so loaded from patched installation"
+    else
+        fail "KWinX11Platform.so NOT from patched installation — vtable crash risk!"
+        warn "QT_PLUGIN_PATH was likely missing when kwin started."
+        warn "Run: psw deploy"
+        exit_code=1
+    fi
+
+    # Secondary: warn if any kwin-related system libs snuck in
+    if [[ ${#kwin_system_libs[@]} -gt 0 ]]; then
+        warn "System kwin libs loaded alongside patched ones — possible ABI mismatch"
+        exit_code=1
+    else
+        ok "No conflicting system kwin libs detected"
+    fi
+
+    return "${exit_code}"
+}
+
+# ─── psw deploy ───────────────────────────────────────────────────────────────
+
+cmd_deploy() {
+    if [[ ! -x "${KWIN_BIN}" ]]; then
+        echo "ERROR: Patched kwin not built yet: ${KWIN_BIN}" >&2
+        echo "       Run: psw build" >&2
+        return 1
+    fi
+
+    if [[ ! -x "${RESTART_SCRIPT}" ]]; then
+        echo "ERROR: Restart script not found: ${RESTART_SCRIPT}" >&2
+        return 1
+    fi
+
+    echo "==> Deploying patched kwin..."
+    echo "    Binary:  ${KWIN_BIN}"
+    echo "    Plugins: ${PLUGIN_PATH}"
+    echo ""
+
+    # restart_plasma_kwin.sh sets QT_PLUGIN_PATH correctly
+    "${RESTART_SCRIPT}"
+
+    echo ""
+    echo "==> Waiting for kwin to settle..."
+    sleep 3
+
+    echo ""
+    echo "==> Verifying loaded libraries..."
+    if ! cmd_check; then
+        echo ""
+        warn "Library check failed — kwin may have loaded wrong plugins"
+        return 1
+    fi
+
+    echo ""
+    echo "==> Verifying compositing..."
+    local active compositing_type
+    active=$(qdbus org.kde.KWin /Compositor \
+        org.kde.kwin.Compositing.active 2>/dev/null || echo "unknown")
+    compositing_type=$(qdbus org.kde.KWin /Compositor \
+        org.kde.kwin.Compositing.compositingType 2>/dev/null || echo "unknown")
+
+    if [[ "${active}" == "true" ]]; then
+        ok "Compositing is active (${compositing_type})"
+    else
+        warn "Compositing not active (active=${active}) — attempting resume..."
+        qdbus org.kde.KWin /Compositor org.kde.kwin.Compositing.resume 2>/dev/null || true
+        sleep 1
+        active=$(qdbus org.kde.KWin /Compositor \
+            org.kde.kwin.Compositing.active 2>/dev/null || echo "unknown")
+        if [[ "${active}" == "true" ]]; then
+            ok "Compositing resumed successfully"
+        else
+            fail "Compositing still inactive after resume attempt"
+            return 1
+        fi
+    fi
+
+    echo ""
+    echo "==> Deploy complete."
+}
+
+# ─── psw test ─────────────────────────────────────────────────────────────────
+
+cmd_test() {
+    echo "==> Plasma Spatial Workspaces smoke test"
+    echo ""
+
+    local kwin_pid
+    kwin_pid=$(pgrep -x kwin_x11 2>/dev/null | head -1 || true)
+    if [[ -z "${kwin_pid}" ]]; then
+        echo "ERROR: kwin_x11 is not running. Run 'psw deploy' first." >&2
+        return 1
+    fi
+    info "kwin_x11 PID: ${kwin_pid}"
+
+    local exit_code=0
+
+    # 1. Library check
+    echo ""
+    echo "  [1/4] Library check..."
+    if cmd_check; then
+        ok "All libs from patched build"
+    else
+        fail "Library check failed — abort smoke test"
+        return 1
+    fi
+
+    # 2. Desktop grid effect toggle
+    echo ""
+    echo "  [2/4] Desktop grid effect..."
+    if qdbus org.kde.KWin /Effects org.kde.kwin.Effects.isEffectLoaded "desktopgrid" \
+            2>/dev/null | grep -q "true"; then
+        info "Effect 'desktopgrid' is loaded"
+    else
+        warn "Effect 'desktopgrid' is not loaded (may be disabled in settings)"
+    fi
+
+    qdbus org.kde.KWin /Effects org.kde.kwin.Effects.toggleEffect "desktopgrid" \
+        2>/dev/null || warn "Could not toggle desktop grid via D-Bus"
+    sleep 1
+
+    if kill -0 "${kwin_pid}" 2>/dev/null; then
+        ok "kwin survived desktop grid toggle"
+    else
+        fail "kwin CRASHED on desktop grid toggle!"
+        return 1
+    fi
+
+    # Dismiss grid
+    qdbus org.kde.KWin /Effects org.kde.kwin.Effects.toggleEffect "desktopgrid" \
+        2>/dev/null || true
+    sleep 1
+
+    if kill -0 "${kwin_pid}" 2>/dev/null; then
+        ok "kwin survived grid dismiss"
+    else
+        fail "kwin CRASHED on grid dismiss!"
+        return 1
+    fi
+
+    # 3. Desktop navigation
+    echo ""
+    echo "  [3/4] Desktop navigation..."
+    local current_desktop
+    current_desktop=$(qdbus org.kde.KWin /KWin org.kde.KWin.currentDesktop \
+        2>/dev/null || echo "")
+
+    if [[ -n "${current_desktop}" ]]; then
+        info "Current desktop: ${current_desktop}"
+
+        qdbus org.kde.KWin /KWin org.kde.KWin.nextDesktop 2>/dev/null || true
+        sleep 0.5
+
+        if kill -0 "${kwin_pid}" 2>/dev/null; then
+            ok "kwin survived nextDesktop"
+        else
+            fail "kwin CRASHED on nextDesktop!"
+            return 1
+        fi
+
+        qdbus org.kde.KWin /KWin org.kde.KWin.previousDesktop 2>/dev/null || true
+        sleep 0.5
+
+        if kill -0 "${kwin_pid}" 2>/dev/null; then
+            ok "kwin survived previousDesktop"
+        else
+            fail "kwin CRASHED on previousDesktop!"
+            return 1
+        fi
+    else
+        warn "Could not query current desktop — skipping navigation test"
+    fi
+
+    # 4. Final stability check
+    echo ""
+    echo "  [4/4] Final stability check..."
+    sleep 1
+    if kill -0 "${kwin_pid}" 2>/dev/null; then
+        ok "kwin PID ${kwin_pid} still running and stable"
+    else
+        fail "kwin CRASHED!"
+        exit_code=1
+    fi
+
+    echo ""
+    if [[ "${exit_code}" -eq 0 ]]; then
+        echo "==> Smoke test PASSED"
+    else
+        echo "==> Smoke test FAILED"
+    fi
+
+    return "${exit_code}"
+}
+
+# ─── Usage ────────────────────────────────────────────────────────────────────
+
+usage() {
+    cat <<'EOF'
+psw - Plasma Spatial Workspaces dev tool
+
+USAGE:
+    psw build    Build and install kwin to ~/.local/kwin-dev/
+    psw check    Verify kwin is using patched .so files (not system ones)
+    psw deploy   Restart kwin with correct QT_PLUGIN_PATH, verify compositing
+    psw test     Smoke test: trigger desktop grid, navigate, verify no crash
+
+PATHS:
+    Build dir:     ~/ws/kwin-dev/build
+    Install dir:   ~/.local/kwin-dev
+    Plugin path:   ~/.local/kwin-dev/lib/x86_64-linux-gnu/plugins
+    Restart script: ~/scripts/restart_plasma_kwin.sh
+
+INSTALL psw to PATH:
+    ln -s "$(realpath dev/psw)" ~/.local/bin/psw
+
+EXAMPLE WORKFLOW:
+    psw build    # Rebuild after patching source files
+    psw deploy   # Restart kwin with new build (sets QT_PLUGIN_PATH)
+    psw check    # Verify correct libs loaded (no system KWinX11Platform.so)
+    psw test     # Smoke test grid effect + desktop navigation
+
+TESTING QT_PLUGIN_PATH DETECTION:
+    # To verify psw check catches the bug class, start kwin without QT_PLUGIN_PATH:
+    #   ~/.local/kwin-dev/bin/kwin_x11 --replace &
+    # Then run: psw check
+    # It should report KWinX11Platform.so NOT from patched installation.
+    # Fix: psw deploy (uses restart_plasma_kwin.sh which sets QT_PLUGIN_PATH)
+EOF
+}
+
+# ─── Dispatch ─────────────────────────────────────────────────────────────────
+
+case "${1:-}" in
+    build)          cmd_build  ;;
+    check)          cmd_check  ;;
+    deploy)         cmd_deploy ;;
+    test)           cmd_test   ;;
+    -h|--help|help) usage      ;;
+    "")             usage; exit 1 ;;
+    *)  echo "ERROR: Unknown command: ${1}" >&2; echo "" >&2; usage >&2; exit 1 ;;
+esac
