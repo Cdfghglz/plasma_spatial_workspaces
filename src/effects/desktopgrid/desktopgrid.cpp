@@ -496,6 +496,11 @@ void DesktopGridEffect::paintWindow(EffectWindow* w, int mask, QRegion region, W
             if (isUsingPresentWindows() && w->isMinimized()) {
                 d.multiplyOpacity(timeline.currentValue());
             }
+            if (activated && timeline.currentValue() < 1.0 && !w->isDesktop()
+                    && !(w->isDock() || w->isSkipSwitcher())) {
+                // immediately hide non-background windows when zoom animation starts
+                d.multiplyOpacity(0.0);
+            }
 
             if (w->isDesktop() && timeline.currentValue() == 1.0) {
                 // desktop windows are not in a motion manager and can always be rendered with
