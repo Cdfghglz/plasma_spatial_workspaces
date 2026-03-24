@@ -155,6 +155,17 @@ cmd_deploy() {
     echo "    Plugins: ${PLUGIN_PATH}"
     echo ""
 
+    # QStandardPaths checks ~/.local/share/ BEFORE XDG_DATA_DIRS, so we must
+    # also copy patched QML files there to override system copies.
+    local user_data="${HOME}/.local/share/kwin"
+    echo "==> Syncing patched QML to ${user_data}/ ..."
+    for subdir in scripts/desktopchangeosd effects/desktopgrid; do
+        if [[ -d "${INSTALL_PREFIX}/share/kwin/${subdir}" ]]; then
+            mkdir -p "${user_data}/${subdir}"
+            cp -r "${INSTALL_PREFIX}/share/kwin/${subdir}/." "${user_data}/${subdir}/"
+        fi
+    done
+
     # restart_plasma_kwin.sh sets QT_PLUGIN_PATH correctly.
     # XDG_DATA_DIRS ensures kwin loads scripts/effects data (QML, metadata) from
     # our install prefix instead of the system /usr/share/kwin/.
