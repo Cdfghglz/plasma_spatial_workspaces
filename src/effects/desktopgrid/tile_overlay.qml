@@ -75,17 +75,14 @@ Item {
         }
     }
 
-    // Double-click to rename: single clicks pass through to C++ for desktop selection.
-    MouseArea {
-        anchors.fill: parent
-        acceptedButtons: Qt.LeftButton
-        onPressed: mouse.accepted = false
-        onReleased: mouse.accepted = false
-        onDoubleClicked: {
+    // Double-click to rename: C++ detects the double-click and emits editingStartRequested.
+    // Single clicks are handled entirely by C++ (desktop selection + grid deactivation).
+    Connections {
+        target: bridge
+        function onEditingStartRequested() {
             nameInput.text = bridge ? bridge.desktopName : ""
             nameInput.forceActiveFocus()
             nameInput.selectAll()
-            mouse.accepted = true
         }
     }
 

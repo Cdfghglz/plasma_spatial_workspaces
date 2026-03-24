@@ -155,8 +155,11 @@ cmd_deploy() {
     echo "    Plugins: ${PLUGIN_PATH}"
     echo ""
 
-    # restart_plasma_kwin.sh sets QT_PLUGIN_PATH correctly
-    "${RESTART_SCRIPT}"
+    # restart_plasma_kwin.sh sets QT_PLUGIN_PATH correctly.
+    # XDG_DATA_DIRS ensures kwin loads scripts/effects data (QML, metadata) from
+    # our install prefix instead of the system /usr/share/kwin/.
+    XDG_DATA_DIRS="${INSTALL_PREFIX}/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" \
+        "${RESTART_SCRIPT}"
 
     echo ""
     echo "==> Waiting for kwin to settle..."

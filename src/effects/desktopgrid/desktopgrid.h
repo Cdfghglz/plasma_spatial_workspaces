@@ -182,6 +182,8 @@ private:
     OffscreenQuickScene *m_editingTileOverlay = nullptr; // overlay with active TextInput
     bool m_tileOverlayGeometryDirty = false; // set when grid/overlays change, cleared after update
     QTimer *m_spatialRebuildTimer = nullptr; // debounce spatialMapChanged → overlay rebuild
+    QTimer *m_singleClickTimer = nullptr;    // defer single-click exit to allow double-click rename
+    int m_pendingClickDesktop = 0;
 
     QAction *m_gestureAction;
     QAction *m_shortcutAction;

@@ -99,6 +99,7 @@ public:
     }
 
     Q_INVOKABLE void setEditing(bool editing) { Q_EMIT editingChanged(editing); }
+    void startEditing() { Q_EMIT editingStartRequested(); }
 
     void notifyDesktopNameChanged() { Q_EMIT desktopNameChanged(); }
     void notifyTotalDesktopsChanged() { Q_EMIT totalDesktopsChanged(); }
@@ -110,6 +111,7 @@ Q_SIGNALS:
     void neighborsChanged();
     void addDesktopRequested(int desktop, const QString &direction);
     void editingChanged(bool editing);
+    void editingStartRequested();
 
 private:
     bool hasSpatialNeighbor(VirtualDesktopSpatialMap::Direction dir) const {
@@ -152,6 +154,18 @@ DesktopGridEffect::DesktopGridEffect()
     // Debounce timer for spatialMapChanged — coalesces rapid signals
     // (e.g. from desktop removal triggering both map change + layout update)
     // into a single overlay rebuild on the next event loop tick.
+    // Single-click deferred activation: waits for double-click interval before
+    // switching desktop, so a double-click can intercept and start rename instead.
+    m_singleClickTimer = new QTimer(this);
+    m_singleClickTimer->setSingleShot(true);
+    connect(m_singleClickTimer, &QTimer::timeout, this, [this]() {
+        if (m_pendingClickDesktop > 0 && activated) {
+            setCurrentDesktop(m_pendingClickDesktop);
+            deactivate();
+        }
+        m_pendingClickDesktop = 0;
+    });
+
     m_spatialRebuildTimer = new QTimer(this);
     m_spatialRebuildTimer->setSingleShot(true);
     m_spatialRebuildTimer->setInterval(0);
@@ -597,9 +611,27 @@ void DesktopGridEffect::windowInputMouseEvent(QEvent* e)
 {
     if ((e->type() != QEvent::MouseMove
             && e->type() != QEvent::MouseButtonPress
-            && e->type() != QEvent::MouseButtonRelease)
+            && e->type() != QEvent::MouseButtonRelease
+            && e->type() != QEvent::MouseButtonDblClick)
             || timeline.currentValue() != 1)  // Block user input during animations
         return;
+
+    // Double-click: find the tile bridge and start rename editing.
+    // Stop the pending single-click deactivation so the grid stays open.
+    if (e->type() == QEvent::MouseButtonDblClick) {
+        m_singleClickTimer->stop();
+        m_pendingClickDesktop = 0;
+        QMouseEvent* me = static_cast<QMouseEvent*>(e);
+        const int desk = posToDesktop(me->pos());
+        for (TileOverlayBridge *bridge : qAsConst(m_tileBridges)) {
+            if (bridge->desktop() == desk) {
+                bridge->startEditing();
+                e->setAccepted(true);
+                return;
+            }
+        }
+        return;
+    }
     QMouseEvent* me = static_cast< QMouseEvent* >(e);
     if (!(wasWindowMove || wasDesktopMove)) {
         for (OffscreenQuickScene *view : qAsConst(m_tileOverlays)) {
@@ -783,12 +815,12 @@ void DesktopGridEffect::windowInputMouseEvent(QEvent* e)
         }
         if (wasWindowMove || wasDesktopMove) { // reset pointer
             effects->defineCursor(Qt::ArrowCursor);
-        } else { // click -> exit
+        } else { // click -> defer exit to allow double-click to cancel
             const int desk = posToDesktop(me->pos());
             if (desk > effects->numberOfDesktops())
                 return; // don't quit when missing desktop
-            setCurrentDesktop(desk);
-            deactivate();
+            m_pendingClickDesktop = desk;
+            m_singleClickTimer->start(QApplication::doubleClickInterval());
         }
         if (windowMove) {
             if (wasWindowMove && isUsingPresentWindows()) {
@@ -828,6 +860,8 @@ void DesktopGridEffect::activate()
 
 void DesktopGridEffect::deactivate()
 {
+    m_singleClickTimer->stop();
+    m_pendingClickDesktop = 0;
     activated = false;
     timeline.setDirection(QTimeLine::Backward);
     timelineRunning = true;
