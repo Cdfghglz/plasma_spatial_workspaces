@@ -207,10 +207,10 @@ Item {
                     ? gridView.itemWidth * root.gridColumns
                     : Math.ceil(Math.max(activityText.implicitWidth, desktopText.implicitWidth))
                 height: root.showGrid
-                    ? gridView.itemHeight * root.gridRows + activityText.height + desktopText.height
+                    ? gridView.itemHeight * root.gridRows
                     : activityText.height + desktopText.height
 
-                // Activity name - large heading
+                // Activity name - shown above grid in text-only mode only
                 PlasmaExtras.Heading {
                     id: activityText
                     level: 1
@@ -221,11 +221,11 @@ Item {
                     wrapMode: Text.NoWrap
                     elide: Text.ElideRight
                     text: root.activityName
-                    visible: root.activityName.length > 0
+                    visible: !root.showGrid && root.activityName.length > 0
                     height: visible ? implicitHeight : 0
                 }
 
-                // Desktop name - smaller heading
+                // Desktop name - shown above grid in text-only mode only
                 PlasmaExtras.Heading {
                     id: desktopText
                     level: 2
@@ -236,6 +236,8 @@ Item {
                     wrapMode: Text.NoWrap
                     elide: Text.ElideRight
                     text: workspace.desktopName(workspace.currentDesktop)
+                    visible: !root.showGrid
+                    height: visible ? implicitHeight : 0
                 }
 
                 Grid {
@@ -349,6 +351,45 @@ Item {
                                     }
                                 }
                             }
+                            // Activity and desktop name overlaid on the selected tile
+                            Column {
+                                anchors.centerIn: parent
+                                width: parent.width - 4
+                                opacity: desktopIndex == root.currentDesktop ? 1.0 : 0.0
+                                visible: desktopIndex >= 0
+
+                                Behavior on opacity {
+                                    NumberAnimation { duration: root.animationDuration/2 }
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    text: root.activityName
+                                    visible: root.activityName.length > 0
+                                    height: visible ? implicitHeight : 0
+                                    color: "white"
+                                    font.bold: true
+                                    style: Text.Outline
+                                    styleColor: "black"
+                                    font.pixelSize: Math.max(8, gridView.itemHeight * 0.18)
+                                    wrapMode: Text.NoWrap
+                                    elide: Text.ElideRight
+                                    horizontalAlignment: Text.AlignHCenter
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    text: workspace.desktopName(workspace.currentDesktop)
+                                    color: "white"
+                                    style: Text.Outline
+                                    styleColor: "black"
+                                    font.pixelSize: Math.max(7, gridView.itemHeight * 0.14)
+                                    wrapMode: Text.NoWrap
+                                    elide: Text.ElideRight
+                                    horizontalAlignment: Text.AlignHCenter
+                                }
+                            }
+
                             states: [
                                 State {
                                     name: "NORMAL"
