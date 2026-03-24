@@ -30,17 +30,51 @@ Item {
                                || belowHover.containsMouse
                                || leftHover.containsMouse
                                || rightHover.containsMouse
+                               || editIconHover.containsMouse
 
-    Text {
-        id: nameLabel
+    // Name label + inline edit icon, shown when not editing
+    Row {
+        id: nameRow
         anchors.centerIn: parent
-        text: bridge ? bridge.desktopName : ""
-        color: "white"
-        font.pixelSize: 14
-        font.bold: true
+        spacing: 4
         visible: !nameInput.activeFocus
-        style: Text.Outline
-        styleColor: "black"
+
+        Text {
+            id: nameLabel
+            text: bridge ? bridge.desktopName : ""
+            color: "white"
+            font.pixelSize: 14
+            font.bold: true
+            style: Text.Outline
+            styleColor: "black"
+            anchors.verticalCenter: parent.verticalCenter
+        }
+
+        Rectangle {
+            id: editIconRect
+            width: 18; height: 18; radius: 4
+            color: editIconHover.containsMouse ? "#44ffffff" : "transparent"
+            opacity: root.tileHovered ? 1.0 : 0.0
+            anchors.verticalCenter: parent.verticalCenter
+            Text {
+                text: "\u270E"  // ✎ pencil
+                anchors.centerIn: parent
+                color: "white"
+                font.pixelSize: 11
+                style: Text.Outline
+                styleColor: "black"
+            }
+            MouseArea {
+                id: editIconHover
+                anchors.fill: parent
+                hoverEnabled: true
+                onClicked: {
+                    nameInput.text = bridge ? bridge.desktopName : ""
+                    nameInput.forceActiveFocus()
+                    nameInput.selectAll()
+                }
+            }
+        }
     }
 
     TextInput {
