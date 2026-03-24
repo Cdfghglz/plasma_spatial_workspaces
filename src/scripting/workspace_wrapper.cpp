@@ -353,6 +353,14 @@ QString WorkspaceWrapper::desktopName(int desktop) const
     return vd ? vd->name() : QString();
 }
 
+void WorkspaceWrapper::setDesktopName(int desktop, const QString &name)
+{
+    VirtualDesktop *vd = VirtualDesktopManager::self()->desktopForX11Id(desktop);
+    if (vd) {
+        vd->setName(name);
+    }
+}
+
 void WorkspaceWrapper::createDesktop(int position, const QString &name) const
 {
     VirtualDesktopManager::self()->createVirtualDesktop(position, name);

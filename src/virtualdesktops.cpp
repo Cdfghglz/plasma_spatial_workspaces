@@ -1000,6 +1000,7 @@ VirtualDesktop *VirtualDesktopManager::createVirtualDesktop(uint position, const
             if (m_rootInfo) {
                 m_rootInfo->setDesktopName(vd->x11DesktopNumber(), vd->name().toUtf8().data());
             }
+            save();
         }
     );
 
@@ -1171,6 +1172,7 @@ void VirtualDesktopManager::setCount(uint count)
                     if (m_rootInfo) {
                         m_rootInfo->setDesktopName(vd->x11DesktopNumber(), vd->name().toUtf8().data());
                     }
+                    save();
                 }
             );
             if (m_rootInfo) {

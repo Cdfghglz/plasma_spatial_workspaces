@@ -329,6 +329,12 @@ void setter( rettype val );
      */
     Q_SCRIPTABLE QString desktopName(int desktop) const;
     /**
+     * Sets the name for the given @p desktop.
+     * @param desktop The x11 desktop number (1-based).
+     * @param name The new name for the desktop.
+     */
+    Q_SCRIPTABLE void setDesktopName(int desktop, const QString &name);
+    /**
      * Create a new virtual desktop at the requested position.
      * @param position The position of the desktop. It should be in range [0, count].
      * @param name The name for the new desktop, if empty the default name will be used.
