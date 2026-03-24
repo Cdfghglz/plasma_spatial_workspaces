@@ -1299,6 +1299,7 @@ void DesktopGridEffect::setupGrid()
         double sScaleX = (geom.width() - m_effectiveBorder * (gridSize.width() + 1)) / double(geom.width() * gridSize.width());
         double sScaleY = (geom.height() - m_effectiveBorder * (gridSize.height() + 1)) / double(geom.height() * gridSize.height());
         double sScale = qMin(sScaleX, sScaleY);
+        if (sScale <= 0.0) sScale = 0.01; // guard against degenerate grids
         double sBorder = m_effectiveBorder / sScale;
         QSizeF size(
             double(geom.width()) * sScale,
@@ -1467,7 +1468,6 @@ void DesktopGridEffect::slotRemoveSpecificDesktop(int desktop)
     if (vdm->isActivityAwareSpatialMode()) {
         QMetaObject::invokeMethod(this, [vdm, id]() {
             vdm->removeDesktopFromCurrentActivityMap(id);
-            // If no activity still references this desktop, truly delete it.
             if (!vdm->isDesktopInAnyActivityMap(id)) {
                 vdm->removeVirtualDesktop(id);
             }
@@ -1792,7 +1792,6 @@ void DesktopGridEffect::updateTileOverlayGeometry()
         // still zero during the first paint after createTileOverlays()).
         if (tileRect.width() < 1 || tileRect.height() < 1)
             continue;
-
         // Only call setGeometry when the rect actually changed to avoid
         // triggering repaintNeeded → addRepaintFull() on every paint frame.
         if (m_tileOverlays[i]->geometry() != tileRect) {
