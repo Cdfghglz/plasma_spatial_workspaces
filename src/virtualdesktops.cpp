@@ -27,6 +27,7 @@
 #include <QStandardPaths>
 #include <QQueue>
 #include <QSet>
+#include <QTimer>
 #include <QUuid>
 
 #include <algorithm>
@@ -611,18 +612,40 @@ void VirtualDesktopManager::initActivities()
         // When the current activity changes, the active spatial map changes too.
         // Re-compute the grid layout and notify callers (e.g. KWin scripts via D-Bus).
         connect(activities, &Activities::currentChanged, this,
-                [this](const QString &) {
+                [this, firstTime = true](const QString &) mutable {
                     if (m_spatialMode) {
-                        updateSpatialLayout();
-                        // Rebuild the VirtualDesktopGrid from the new
-                        // activity's spatial map so that desktopGridCoords()
-                        // returns correct positions.
+                        if (firstTime) {
+                            // First currentChanged after startup: the activity
+                            // was unknown during load() so updateLayout() could
+                            // not push spatial dimensions to _NET_DESKTOP_LAYOUT.
+                            // Do the full updateSpatialLayout() now that we know
+                            // which activity map to use.
+                            firstTime = false;
+                            m_grid.updateFromSpatialMap(activeSpatialMap(), m_desktops);
+                            m_rows = qMax(1, m_grid.height());
+                            updateSpatialLayout();
+                            QTimer::singleShot(0, this, [this]() {
+                                Q_EMIT layoutChanged(m_grid.width(), m_rows);
+                                Q_EMIT rowsChanged(m_rows);
+                                Q_EMIT spatialMapChanged();
+                            });
+                            return;
+                        }
+                        // Subsequent activity switches: rebuild the internal
+                        // grid but do NOT call updateSpatialLayout() —
+                        // _NET_DESKTOP_LAYOUT uses max dimensions across all
+                        // activities and must not change on activity switch
+                        // (causes plasmashell containment churn and memory leak).
                         m_grid.updateFromSpatialMap(activeSpatialMap(), m_desktops);
                         m_rows = qMax(1, m_grid.height());
-                        Q_EMIT layoutChanged(m_grid.width(), m_rows);
-                        Q_EMIT rowsChanged(m_rows);
+                        // Coalesce signals into a single event-loop tick so
+                        // plasmashell processes one structural change, not three.
+                        QTimer::singleShot(0, this, [this]() {
+                            Q_EMIT layoutChanged(m_grid.width(), m_rows);
+                            Q_EMIT rowsChanged(m_rows);
+                            Q_EMIT spatialMapChanged();
+                        });
                     }
-                    Q_EMIT spatialMapChanged();
                 },
                 Qt::UniqueConnection);
     }
@@ -665,11 +688,17 @@ void VirtualDesktopManager::setRootInfo(NETRootInfo *info)
 
     // Nothing will be connected to rootInfo
     if (m_rootInfo) {
-        int columns = count() / m_rows;
-        if (count() % m_rows > 0) {
-            columns++;
+        if (!m_spatialMode) {
+            // Only write the simple rows-based grid when NOT in spatial mode.
+            // In spatial mode updateLayout() (called by updateRootInfo below)
+            // derives the grid from the neighbor graph; writing a naive grid
+            // here would briefly flash wrong dimensions.
+            int columns = count() / m_rows;
+            if (count() % m_rows > 0) {
+                columns++;
+            }
+            m_rootInfo->setDesktopLayout(NET::OrientationHorizontal, columns, m_rows, NET::DesktopLayoutCornerTopLeft);
         }
-        m_rootInfo->setDesktopLayout(NET::OrientationHorizontal, columns, m_rows, NET::DesktopLayoutCornerTopLeft);
         updateRootInfo();
         m_rootInfo->setCurrentDesktop(currentDesktop()->x11DesktopNumber());
         for (auto *vd : qAsConst(m_desktops)) {
@@ -1009,6 +1038,11 @@ void VirtualDesktopManager::removeVirtualDesktop(VirtualDesktop *desktop)
         if (m_rootInfo) {
             m_rootInfo->setDesktopName(j + 1, m_desktops[j]->name().toUtf8().data());
         }
+    }
+    // Clear the stale name at the old last position so _NET_DESKTOP_NAMES
+    // doesn't retain a phantom entry (off-by-one that confuses plasmashell).
+    if (m_rootInfo) {
+        m_rootInfo->setDesktopName(m_desktops.count() + 1, "");
     }
 
     const uint newCurrent = qMin(oldCurrent, (uint)m_desktops.count());
@@ -1395,129 +1429,85 @@ void VirtualDesktopManager::updateSpatialLayout()
         return;
     }
 
-    // BFS from the top-left desktop in the active spatial map to assign
-    // (col, row) coordinates.
-    QHash<QString, QPoint> positions;
-    QQueue<VirtualDesktop *> queue;
+    // Compute the maximum grid dimensions across ALL activity spatial maps
+    // so that _NET_DESKTOP_LAYOUT stays constant during activity switches.
+    // This prevents plasmashell from churning containments on every switch.
+    uint maxColumns = 1, maxRows = 1;
 
-    // Find a desktop that's in the active spatial map (prefer top-left).
-    const auto &smap = activeSpatialMap();
-    VirtualDesktop *start = nullptr;
-    for (auto *vd : qAsConst(m_desktops)) {
-        if (smap.containsDesktop(vd->id())) {
-            if (smap.neighbor(vd->id(), VirtualDesktopSpatialMap::Direction::Above).isEmpty() &&
-                smap.neighbor(vd->id(), VirtualDesktopSpatialMap::Direction::Left).isEmpty()) {
-                start = vd;
-                break;
+    for (auto it = m_spatialMaps.constBegin(); it != m_spatialMaps.constEnd(); ++it) {
+        const auto &smap = it.value();
+        if (smap.isEmpty()) {
+            continue;
+        }
+
+        // BFS to compute this activity's bounding box
+        QHash<QString, QPoint> positions;
+        QQueue<VirtualDesktop *> queue;
+
+        VirtualDesktop *start = nullptr;
+        for (auto *vd : qAsConst(m_desktops)) {
+            if (smap.containsDesktop(vd->id())) {
+                if (smap.neighbor(vd->id(), VirtualDesktopSpatialMap::Direction::Above).isEmpty() &&
+                    smap.neighbor(vd->id(), VirtualDesktopSpatialMap::Direction::Left).isEmpty()) {
+                    start = vd;
+                    break;
+                }
+                if (!start) {
+                    start = vd;
+                }
             }
-            if (!start) {
-                start = vd;  // fallback: first desktop in the map
+        }
+        if (!start) {
+            continue;
+        }
+
+        positions[start->id()] = QPoint(0, 0);
+        queue.enqueue(start);
+
+        auto tryVisit = [&](const QString &fromId, const QString &neighborId, int dc, int dr) {
+            if (neighborId.isEmpty() || positions.contains(neighborId)) {
+                return;
+            }
+            VirtualDesktop *neighbor = desktopForId(neighborId);
+            if (!neighbor) {
+                return;
+            }
+            const QPoint fromPos = positions.value(fromId);
+            positions[neighborId] = QPoint(fromPos.x() + dc, fromPos.y() + dr);
+            queue.enqueue(neighbor);
+        };
+
+        while (!queue.isEmpty()) {
+            VirtualDesktop *vd = queue.dequeue();
+            const QString &id = vd->id();
+            tryVisit(id, smap.neighbor(id, VirtualDesktopSpatialMap::Direction::Right), 1,  0);
+            tryVisit(id, smap.neighbor(id, VirtualDesktopSpatialMap::Direction::Left),  -1, 0);
+            tryVisit(id, smap.neighbor(id, VirtualDesktopSpatialMap::Direction::Below),  0,  1);
+            tryVisit(id, smap.neighbor(id, VirtualDesktopSpatialMap::Direction::Above),  0, -1);
+        }
+
+        int minCol = 0, maxCol = 0, minRow = 0, maxRow = 0;
+        bool first = true;
+        for (const QPoint &pos : qAsConst(positions)) {
+            if (first) {
+                minCol = maxCol = pos.x();
+                minRow = maxRow = pos.y();
+                first = false;
+            } else {
+                minCol = qMin(minCol, pos.x());
+                maxCol = qMax(maxCol, pos.x());
+                minRow = qMin(minRow, pos.y());
+                maxRow = qMax(maxRow, pos.y());
             }
         }
-    }
-    if (!start) {
-        // No desktop in the active spatial map — fall back to first desktop
-        start = m_desktops.first();
-    }
-    positions[start->id()] = QPoint(0, 0);
-    queue.enqueue(start);
 
-    auto tryVisit = [&](const QString &fromId, const QString &neighborId, int dc, int dr) {
-        if (neighborId.isEmpty() || positions.contains(neighborId)) {
-            return;
-        }
-        VirtualDesktop *neighbor = desktopForId(neighborId);
-        if (!neighbor) {
-            return;
-        }
-        const QPoint fromPos = positions.value(fromId);
-        positions[neighborId] = QPoint(fromPos.x() + dc, fromPos.y() + dr);
-        queue.enqueue(neighbor);
-    };
-
-    while (!queue.isEmpty()) {
-        VirtualDesktop *vd = queue.dequeue();
-        const QString &id = vd->id();
-        tryVisit(id, activeSpatialMap().neighbor(id, VirtualDesktopSpatialMap::Direction::Right), 1,  0);
-        tryVisit(id, activeSpatialMap().neighbor(id, VirtualDesktopSpatialMap::Direction::Left),  -1, 0);
-        tryVisit(id, activeSpatialMap().neighbor(id, VirtualDesktopSpatialMap::Direction::Below),  0,  1);
-        tryVisit(id, activeSpatialMap().neighbor(id, VirtualDesktopSpatialMap::Direction::Above),  0, -1);
+        const uint cols = static_cast<uint>(maxCol - minCol + 1);
+        const uint rows = static_cast<uint>(maxRow - minRow + 1);
+        maxColumns = qMax(maxColumns, cols);
+        maxRows = qMax(maxRows, rows);
     }
 
-    // Compute bounding box over all positioned desktops.
-    int minCol = 0, maxCol = 0, minRow = 0, maxRow = 0;
-    bool first = true;
-    for (const QPoint &pos : qAsConst(positions)) {
-        if (first) {
-            minCol = maxCol = pos.x();
-            minRow = maxRow = pos.y();
-            first = false;
-        } else {
-            minCol = qMin(minCol, pos.x());
-            maxCol = qMax(maxCol, pos.x());
-            minRow = qMin(minRow, pos.y());
-            maxRow = qMax(maxRow, pos.y());
-        }
-    }
-
-    // Normalize so the top-left position is (0, 0).
-    for (auto it = positions.begin(); it != positions.end(); ++it) {
-        it.value() -= QPoint(minCol, minRow);
-    }
-
-    const uint columns = static_cast<uint>(maxCol - minCol + 1);
-    const uint rows    = static_cast<uint>(maxRow - minRow + 1);
-
-    // Renumber desktops so their X11 numbers match the spatial grid positions
-    // in row-major order.  The pager reads _NET_DESKTOP_LAYOUT as a dense grid
-    // and places desktop N at linear position N-1, so desktop 1 maps to (0,0),
-    // desktop 2 to (1,0), etc.  If the X11 numbers don't match the spatial
-    // positions the pager will show desktop 10 under desktop 7 instead of
-    // under its actual spatial neighbour.
-    //
-    // Sort positioned desktops by (row, col), assign them X11 numbers 1..K,
-    // then append any unpositioned desktops with the remaining numbers.
-    QVector<VirtualDesktop *> sorted;
-    sorted.reserve(m_desktops.size());
-
-    // Collect positioned desktops and sort by (row, col).
-    QVector<QPair<QPoint, VirtualDesktop *>> positioned;
-    positioned.reserve(positions.size());
-    for (auto it = positions.constBegin(); it != positions.constEnd(); ++it) {
-        VirtualDesktop *vd = desktopForId(it.key());
-        if (vd) {
-            positioned.append({it.value(), vd});
-        }
-    }
-    std::sort(positioned.begin(), positioned.end(),
-              [](const QPair<QPoint, VirtualDesktop *> &a, const QPair<QPoint, VirtualDesktop *> &b) {
-                  if (a.first.y() != b.first.y()) {
-                      return a.first.y() < b.first.y();
-                  }
-                  return a.first.x() < b.first.x();
-              });
-    for (const auto &pair : qAsConst(positioned)) {
-        sorted.append(pair.second);
-    }
-
-    // Append desktops that are not in the spatial map (other activities, etc.).
-    for (auto *vd : qAsConst(m_desktops)) {
-        if (!positions.contains(vd->id())) {
-            sorted.append(vd);
-        }
-    }
-
-    // Apply new ordering: update m_desktops, assign X11 numbers, and
-    // notify rootInfo of the new desktop names.
-    m_desktops = sorted;
-    for (int i = 0; i < m_desktops.size(); ++i) {
-        m_desktops[i]->setX11DesktopNumber(i + 1);
-        if (m_rootInfo) {
-            m_rootInfo->setDesktopName(i + 1, m_desktops[i]->name().toUtf8().data());
-        }
-    }
-
-    m_rootInfo->setDesktopLayout(NET::OrientationHorizontal, columns, rows, NET::DesktopLayoutCornerTopLeft);
+    m_rootInfo->setDesktopLayout(NET::OrientationHorizontal, maxColumns, maxRows, NET::DesktopLayoutCornerTopLeft);
     m_rootInfo->activate();
 }
 
