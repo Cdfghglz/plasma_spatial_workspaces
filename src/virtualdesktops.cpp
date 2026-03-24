@@ -1161,6 +1161,34 @@ uint VirtualDesktopManager::rows() const
     return m_rows;
 }
 
+int VirtualDesktopManager::spatialGridRows() const
+{
+    return m_grid.height();
+}
+
+int VirtualDesktopManager::spatialGridColumns() const
+{
+    return m_grid.width();
+}
+
+QString VirtualDesktopManager::spatialGridLayout() const
+{
+    QJsonObject layout;
+    for (int r = 0; r < m_grid.height(); ++r) {
+        for (int c = 0; c < m_grid.width(); ++c) {
+            VirtualDesktop *vd = m_grid.at({c, r});
+            if (vd) {
+                QJsonObject cell;
+                cell[QStringLiteral("row")] = r;
+                cell[QStringLiteral("col")] = c;
+                cell[QStringLiteral("name")] = vd->name();
+                layout[vd->id()] = cell;
+            }
+        }
+    }
+    return QString::fromUtf8(QJsonDocument(layout).toJson(QJsonDocument::Compact));
+}
+
 void VirtualDesktopManager::setRows(uint rows)
 {
     if (rows == 0 || rows > count() || rows == m_rows) {

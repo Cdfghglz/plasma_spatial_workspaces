@@ -284,6 +284,18 @@ public:
      */
     uint rows() const;
     /**
+     * @returns the number of rows in the spatial grid (or m_rows if not in spatial mode).
+     */
+    int spatialGridRows() const;
+    /**
+     * @returns the number of columns in the spatial grid (or computed from count/rows if not in spatial mode).
+     */
+    int spatialGridColumns() const;
+    /**
+     * @returns a JSON string describing the spatial grid layout.
+     */
+    QString spatialGridLayout() const;
+    /**
      * @returns The ID of the current desktop.
      * @see setCurrent
      * @see currentChanged
