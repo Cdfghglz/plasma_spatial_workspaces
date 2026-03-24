@@ -87,7 +87,7 @@ resolve that placeholder with this rule:
 You MUST process steps in strict DAG order. Walk through each step sequentially,
 unless you are explicitly told to skip to a step."""
 formula = "mol-refinery-patrol"
-version = 12
+version = 13
 
 [vars]
 [vars.wisp_type]
@@ -120,7 +120,7 @@ default = ""
 
 [vars.test_command]
 description = "Test command to run (if run_tests is true)"
-default = "go test ./..."
+default = ""
 
 [vars.build_command]
 description = "Build command (e.g., go build ./...). Empty = skip."
