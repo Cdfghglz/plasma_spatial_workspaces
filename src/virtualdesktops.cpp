@@ -578,11 +578,20 @@ VirtualDesktopSpatialMap &VirtualDesktopManager::activeSpatialMap()
     if (Activities *activities = Activities::self()) {
         const QString activityId = activities->current();
         if (!activityId.isEmpty()) {
+            auto it = m_spatialMaps.find(activityId);
+            if (it != m_spatialMaps.end() && !it.value().isEmpty()) {
+                return it.value();
+            }
+            // Per-activity map missing or empty — seed from __default__ so that
+            // the first write to a new activity inherits the existing layout.
+            auto def = m_spatialMaps.constFind(defaultActivityKey());
+            if (def != m_spatialMaps.constEnd() && !def.value().isEmpty()) {
+                m_spatialMaps[activityId] = def.value();
+            }
             return m_spatialMaps[activityId];
         }
         // Activities service present but current activity not yet set (startup race).
         // Return a throwaway slot so transient writes don't pollute __default__.
-        // The slot is consistent within the startup window but is never saved to disk.
         return m_pendingSpatialMap;
     }
     return m_spatialMaps[defaultActivityKey()];
@@ -598,7 +607,14 @@ const VirtualDesktopSpatialMap &VirtualDesktopManager::activeSpatialMap() const
             return empty;
         }
         auto it = m_spatialMaps.constFind(activityId);
-        return (it != m_spatialMaps.constEnd()) ? it.value() : empty;
+        if (it != m_spatialMaps.constEnd() && !it.value().isEmpty()) {
+            return it.value();
+        }
+        // Per-activity map missing or empty — fall back to __default__.
+        // This handles the common case where per-activity JSON files haven't
+        // been populated yet (e.g. first boot with Activities enabled).
+        auto def = m_spatialMaps.constFind(defaultActivityKey());
+        return (def != m_spatialMaps.constEnd()) ? def.value() : empty;
     }
     auto it = m_spatialMaps.constFind(defaultActivityKey());
     return (it != m_spatialMaps.constEnd()) ? it.value() : empty;
@@ -1317,6 +1333,18 @@ void VirtualDesktopManager::load()
         }
     }
 
+    // Seed empty per-activity maps from __default__ so that activities created
+    // before spatial mode was enabled (or whose JSON files are empty) inherit
+    // the default layout rather than appearing blank.
+    const auto &defaultMap = m_spatialMaps[defaultActivityKey()];
+    if (!defaultMap.isEmpty()) {
+        for (auto it = m_spatialMaps.begin(); it != m_spatialMaps.end(); ++it) {
+            if (it.key() != defaultActivityKey() && it.value().isEmpty()) {
+                it.value() = defaultMap;
+            }
+        }
+    }
+
     s_loadingDesktopSettings = false;
 
     initActivities();
@@ -1443,6 +1471,12 @@ void VirtualDesktopManager::setSpatialNeighbor(const QString &desktopId, const Q
     }
 
     activeSpatialMap().setNeighbor(desktopId, dir, neighborId);
+
+    if (m_batchSpatialDepth > 0) {
+        // Defer save/rebuild/signals until endBatchSpatialUpdate().
+        return;
+    }
+
     save();
 
     // Rebuild m_grid from the updated spatial map so that
@@ -1451,6 +1485,29 @@ void VirtualDesktopManager::setSpatialNeighbor(const QString &desktopId, const Q
     m_rows = qMax(1, m_grid.height());
 
     // Update _NET_DESKTOP_LAYOUT (max dimensions across all activity maps).
+    updateSpatialLayout();
+    Q_EMIT layoutChanged(m_grid.width(), m_rows);
+    Q_EMIT rowsChanged(m_rows);
+    Q_EMIT spatialMapChanged();
+}
+
+void VirtualDesktopManager::beginBatchSpatialUpdate()
+{
+    ++m_batchSpatialDepth;
+}
+
+void VirtualDesktopManager::endBatchSpatialUpdate()
+{
+    if (m_batchSpatialDepth <= 0) {
+        return;
+    }
+    if (--m_batchSpatialDepth > 0) {
+        return;
+    }
+    // Batch complete — do the deferred work once.
+    save();
+    m_grid.updateFromSpatialMap(activeSpatialMap(), m_desktops);
+    m_rows = qMax(1, m_grid.height());
     updateSpatialLayout();
     Q_EMIT layoutChanged(m_grid.width(), m_rows);
     Q_EMIT rowsChanged(m_rows);

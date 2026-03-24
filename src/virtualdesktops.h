@@ -538,6 +538,20 @@ public Q_SLOTS:
      * Exposed on D-Bus as a method on org.kde.KWin.VirtualDesktopManager.
      */
     Q_SCRIPTABLE void setSpatialNeighbor(const QString &desktopId, const QString &direction, const QString &neighborId);
+
+    /**
+     * Begin a batch of spatial neighbor updates. While batching is active,
+     * setSpatialNeighbor() accumulates changes without saving to disk or
+     * emitting signals. Call endBatchSpatialUpdate() when done to persist
+     * all changes and emit signals once.
+     */
+    void beginBatchSpatialUpdate();
+    /**
+     * End a batch of spatial neighbor updates. Saves, rebuilds the grid,
+     * updates _NET_DESKTOP_LAYOUT, and emits signals once for all batched changes.
+     */
+    void endBatchSpatialUpdate();
+
     /**
      * Loads number of desktops and names from configuration file
      */
@@ -716,6 +730,7 @@ private:
     // Data written here is intentionally discarded; it is never saved to disk.
     VirtualDesktopSpatialMap m_pendingSpatialMap;
     bool m_spatialMode = false;
+    int m_batchSpatialDepth = 0;
     // TODO: QPointer
     NETRootInfo *m_rootInfo;
     KWaylandServer::PlasmaVirtualDesktopManagementInterface *m_virtualDesktopManagement = nullptr;

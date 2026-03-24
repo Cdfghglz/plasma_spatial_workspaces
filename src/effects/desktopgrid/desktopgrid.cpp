@@ -1839,10 +1839,11 @@ void DesktopGridEffect::slotAddDesktopInDirection(int desktop, const QString &di
             return;
 
         // Link the two desktops as spatial neighbors in both directions.
-        // Use setSpatialNeighbor() (public API) so that _NET_DESKTOP_LAYOUT
-        // is updated and the changes are persisted to kwinrc.
+        // Batch the two calls so save/rebuild/signals happen only once.
+        vds->beginBatchSpatialUpdate();
         vds->setSpatialNeighbor(fromId,      direction,    newVd->id());
         vds->setSpatialNeighbor(newVd->id(), oppDirection, fromId);
+        vds->endBatchSpatialUpdate();
 
         // desktopsAdded() already rebuilt grid+overlays, but neighbor links
         // weren't set yet at that point. Rebuild once more with correct state.
