@@ -30,19 +30,65 @@ PlasmaCore.Dialog {
             }
         }
 
-        // Parse the CSV spatial grid layout into an array of desktop numbers.
-        // Each element is the x11 desktop number at that grid cell (0 = empty).
-        function parseSpatialGrid() {
-            var layout = workspace.spatialGridLayout;
-            if (!layout || layout.length === 0) {
-                return [];
+        // Build spatial grid via BFS from spatial neighbor API.
+        // Returns array of desktop numbers (1-based, 0=empty) in row-major order.
+        function buildSpatialGrid() {
+            var count = workspace.desktops;
+            var cols = workspace.desktopGridWidth;
+            var rows = workspace.desktopGridHeight;
+
+            // BFS: assign grid positions to each desktop using spatial neighbors.
+            var positions = {};  // desktop# -> {x, y}
+            var visited = {};
+            var queue = [1];  // start from desktop 1
+            positions[1] = {x: 0, y: 0};
+            visited[1] = true;
+
+            while (queue.length > 0) {
+                var cur = queue.shift();
+                var pos = positions[cur];
+
+                var neighbors = [
+                    {d: workspace.spatialNeighborRight(cur), dx: 1, dy: 0},
+                    {d: workspace.spatialNeighborDown(cur),  dx: 0, dy: 1},
+                    {d: workspace.spatialNeighborLeft(cur),  dx: -1, dy: 0},
+                    {d: workspace.spatialNeighborUp(cur),    dx: 0, dy: -1}
+                ];
+
+                for (var i = 0; i < neighbors.length; i++) {
+                    var n = neighbors[i];
+                    if (n.d > 0 && !visited[n.d]) {
+                        visited[n.d] = true;
+                        positions[n.d] = {x: pos.x + n.dx, y: pos.y + n.dy};
+                        queue.push(n.d);
+                    }
+                }
             }
-            var parts = layout.split(",");
-            var result = [];
-            for (var i = 0; i < parts.length; i++) {
-                result.push(parseInt(parts[i], 10));
+
+            // Normalize positions so minimum is (0, 0)
+            var minX = 0, minY = 0;
+            for (var d in positions) {
+                if (positions[d].x < minX) minX = positions[d].x;
+                if (positions[d].y < minY) minY = positions[d].y;
             }
-            return result;
+
+            // Build row-major grid array
+            var grid = [];
+            for (var r = 0; r < rows; r++) {
+                for (var c = 0; c < cols; c++) {
+                    grid.push(0);
+                }
+            }
+
+            for (var d in positions) {
+                var gx = positions[d].x - minX;
+                var gy = positions[d].y - minY;
+                if (gy >= 0 && gy < rows && gx >= 0 && gx < cols) {
+                    grid[gy * cols + gx] = parseInt(d);
+                }
+            }
+
+            return grid;
         }
 
         function show() {
@@ -63,7 +109,7 @@ PlasmaCore.Dialog {
                 view.rows = workspace.desktopGridHeight;
                 // Update spatial grid model
                 if (workspace.spatialMode) {
-                    var grid = dialogItem.parseSpatialGrid();
+                    var grid = dialogItem.buildSpatialGrid();
                     dialogItem.spatialCells = grid;
                     repeater.model = grid.length;
                 } else {
@@ -134,9 +180,9 @@ PlasmaCore.Dialog {
                 Item {
                     width: view.itemWidth
                     height: view.itemHeight
-                    // In spatial mode, some cells may be empty
+                    // In spatial mode, some cells may be empty - keep visible for Grid layout
                     property int desktopIndex: dialogItem.desktopForCell(index)
-                    visible: desktopIndex >= 0
+                    opacity: desktopIndex >= 0 ? 1.0 : 0.0
                     PlasmaCore.FrameSvgItem {
                         anchors.fill: parent
                         imagePath: "widgets/pager"
@@ -157,7 +203,6 @@ PlasmaCore.Dialog {
                         id: arrowsContainer
                         anchors.fill: parent
                         visible: parent.desktopIndex >= 0
-                        // Arrows use desktopIndex for position logic
                         KQuickControlsAddons.QIconItem {
                             anchors.fill: parent
                             icon: "go-up"
@@ -167,10 +212,9 @@ PlasmaCore.Dialog {
                             anchors.fill: parent
                             icon: "go-down"
                             visible: {
-                                var di = desktopIndex;
-                                if (di < 0) return false;
-                                if (dialogItem.currentDesktop <= di) return false;
-                                if (di < dialogItem.previousDesktop) return false;
+                                if (desktopIndex < 0) return false;
+                                if (dialogItem.currentDesktop <= desktopIndex) return false;
+                                if (desktopIndex < dialogItem.previousDesktop) return false;
                                 if (dialogItem.currentDesktop < dialogItem.previousDesktop) return false;
                                 if (Math.floor(dialogItem.currentDesktop/view.columns) == Math.floor(index/view.columns)) return false;
                                 if (dialogItem.previousDesktop % view.columns == index % view.columns) return true;
@@ -181,10 +225,9 @@ PlasmaCore.Dialog {
                             anchors.fill: parent
                             icon: "go-up"
                             visible: {
-                                var di = desktopIndex;
-                                if (di < 0) return false;
-                                if (dialogItem.currentDesktop >= di) return false;
-                                if (di > dialogItem.previousDesktop) return false;
+                                if (desktopIndex < 0) return false;
+                                if (dialogItem.currentDesktop >= desktopIndex) return false;
+                                if (desktopIndex > dialogItem.previousDesktop) return false;
                                 if (dialogItem.currentDesktop > dialogItem.previousDesktop) return false;
                                 if (Math.floor(dialogItem.currentDesktop/view.columns) == Math.floor(index/view.columns)) return false;
                                 if (dialogItem.previousDesktop % view.columns == index % view.columns) return true;
@@ -195,10 +238,9 @@ PlasmaCore.Dialog {
                             anchors.fill: parent
                             icon: "go-next"
                             visible: {
-                                var di = desktopIndex;
-                                if (di < 0) return false;
-                                if (dialogItem.currentDesktop <= di) return false;
-                                if (di < dialogItem.previousDesktop) {
+                                if (desktopIndex < 0) return false;
+                                if (dialogItem.currentDesktop <= desktopIndex) return false;
+                                if (desktopIndex < dialogItem.previousDesktop) {
                                     if (Math.floor(dialogItem.currentDesktop/view.columns) == Math.floor(index/view.columns)) {
                                         if (index % view.columns >= dialogItem.previousDesktop % view.columns) return true;
                                     }
@@ -216,10 +258,9 @@ PlasmaCore.Dialog {
                             anchors.fill: parent
                             icon: "go-previous"
                             visible: {
-                                var di = desktopIndex;
-                                if (di < 0) return false;
-                                if (dialogItem.currentDesktop >= di) return false;
-                                if (di > dialogItem.previousDesktop) {
+                                if (desktopIndex < 0) return false;
+                                if (dialogItem.currentDesktop >= desktopIndex) return false;
+                                if (desktopIndex > dialogItem.previousDesktop) {
                                     if (Math.floor(dialogItem.currentDesktop/view.columns) == Math.floor(index/view.columns)) {
                                         if (index % view.columns <= dialogItem.previousDesktop % view.columns) return true;
                                     }
@@ -275,7 +316,6 @@ PlasmaCore.Dialog {
                 if (!workspace.spatialMode) {
                     repeater.model = workspace.desktops;
                 }
-                // In spatial mode, show() will update the model from spatialGridLayout
             }
         }
         Connections {
