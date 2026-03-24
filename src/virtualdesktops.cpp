@@ -1445,9 +1445,15 @@ void VirtualDesktopManager::setSpatialNeighbor(const QString &desktopId, const Q
     activeSpatialMap().setNeighbor(desktopId, dir, neighborId);
     save();
 
-    // Always update layout when neighbors are explicitly set — the caller
-    // is building a spatial layout regardless of the global spatialMode toggle.
+    // Rebuild m_grid from the updated spatial map so that
+    // desktopGridCoords() returns correct positions for the slide effect.
+    m_grid.updateFromSpatialMap(activeSpatialMap(), m_desktops);
+    m_rows = qMax(1, m_grid.height());
+
+    // Update _NET_DESKTOP_LAYOUT (max dimensions across all activity maps).
     updateSpatialLayout();
+    Q_EMIT layoutChanged(m_grid.width(), m_rows);
+    Q_EMIT rowsChanged(m_rows);
     Q_EMIT spatialMapChanged();
 }
 
