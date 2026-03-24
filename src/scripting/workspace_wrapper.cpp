@@ -423,6 +423,11 @@ int WorkspaceWrapper::desktopGridHeight() const
     return desktopGridSize().height();
 }
 
+QString WorkspaceWrapper::spatialGridLayout() const
+{
+    return VirtualDesktopManager::self()->spatialGridLayout();
+}
+
 int WorkspaceWrapper::workspaceHeight() const
 {
     return desktopGridHeight() * displayHeight();

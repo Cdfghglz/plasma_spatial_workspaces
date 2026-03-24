@@ -38,6 +38,7 @@ class WorkspaceWrapper : public QObject
     Q_PROPERTY(QSize desktopGridSize READ desktopGridSize NOTIFY desktopLayoutChanged)
     Q_PROPERTY(int desktopGridWidth READ desktopGridWidth NOTIFY desktopLayoutChanged)
     Q_PROPERTY(int desktopGridHeight READ desktopGridHeight NOTIFY desktopLayoutChanged)
+    Q_PROPERTY(QString spatialGridLayout READ spatialGridLayout NOTIFY desktopLayoutChanged)
     Q_PROPERTY(int workspaceWidth READ workspaceWidth)
     Q_PROPERTY(int workspaceHeight READ workspaceHeight)
     Q_PROPERTY(QSize workspaceSize READ workspaceSize)
@@ -231,6 +232,7 @@ void setter( rettype val );
     QSize desktopGridSize() const;
     int desktopGridWidth() const;
     int desktopGridHeight() const;
+    QString spatialGridLayout() const;
     int workspaceWidth() const;
     int workspaceHeight() const;
     QSize workspaceSize() const;
