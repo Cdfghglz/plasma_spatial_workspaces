@@ -1257,7 +1257,11 @@ void DesktopGridEffect::setupGrid()
     // We need these variables for every paint so lets cache them
     int x, y;
     int numDesktops = effects->numberOfDesktops();
-    switch(layoutMode) {
+    // In spatial mode, always use the pager layout so that the grid
+    // reflects the actual spatial neighbor topology from _NET_DESKTOP_LAYOUT,
+    // regardless of the user's layoutMode config setting.
+    int effectiveLayoutMode = (effects->isSpatialMode()) ? LayoutPager : layoutMode;
+    switch(effectiveLayoutMode) {
     default:
     case LayoutPager:
         orientation = Qt::Horizontal;

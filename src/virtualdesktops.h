@@ -203,6 +203,13 @@ public:
      */
     bool containsDesktop(const QString &desktopId) const;
 
+    /**
+     * Merge missing desktop entries from @p other into this map.
+     * Existing entries are NOT overwritten — only desktops absent from
+     * this map are copied from @p other.
+     */
+    void mergeFrom(const VirtualDesktopSpatialMap &other);
+
 private:
     static QString directionSuffix(Direction direction);
 

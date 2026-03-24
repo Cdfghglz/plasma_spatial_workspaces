@@ -217,6 +217,26 @@ bool VirtualDesktopSpatialMap::containsDesktop(const QString &desktopId) const
     return m_neighbors.contains(desktopId);
 }
 
+void VirtualDesktopSpatialMap::mergeFrom(const VirtualDesktopSpatialMap &other)
+{
+    // Merge entries from @p other into this map.
+    // - Missing desktops are added wholesale.
+    // - For existing desktops, empty neighbor slots are filled from @p other
+    //   (non-empty slots are NOT overwritten).
+    for (auto it = other.m_neighbors.constBegin(); it != other.m_neighbors.constEnd(); ++it) {
+        if (!m_neighbors.contains(it.key())) {
+            m_neighbors[it.key()] = it.value();
+        } else {
+            auto &local = m_neighbors[it.key()];
+            const auto &remote = it.value();
+            if (local.above.isEmpty() && !remote.above.isEmpty()) local.above = remote.above;
+            if (local.below.isEmpty() && !remote.below.isEmpty()) local.below = remote.below;
+            if (local.left.isEmpty()  && !remote.left.isEmpty())  local.left  = remote.left;
+            if (local.right.isEmpty() && !remote.right.isEmpty()) local.right = remote.right;
+        }
+    }
+}
+
 void VirtualDesktopSpatialMap::load(const KConfigGroup &group)
 {
     m_neighbors.clear();
@@ -1189,20 +1209,19 @@ int VirtualDesktopManager::spatialGridColumns() const
 
 QString VirtualDesktopManager::spatialGridLayout() const
 {
-    QJsonObject layout;
+    // Return a flat comma-separated list of x11 desktop numbers in row-major
+    // order.  Empty cells are represented as 0.  This format is consumed by
+    // the spatial pager QML widget which splits on ',' and parseInt()s each
+    // element.
+    QStringList cells;
+    cells.reserve(m_grid.width() * m_grid.height());
     for (int r = 0; r < m_grid.height(); ++r) {
         for (int c = 0; c < m_grid.width(); ++c) {
             VirtualDesktop *vd = m_grid.at({c, r});
-            if (vd) {
-                QJsonObject cell;
-                cell[QStringLiteral("row")] = r;
-                cell[QStringLiteral("col")] = c;
-                cell[QStringLiteral("name")] = vd->name();
-                layout[vd->id()] = cell;
-            }
+            cells << QString::number(vd ? vd->x11DesktopNumber() : 0);
         }
     }
-    return QString::fromUtf8(QJsonDocument(layout).toJson(QJsonDocument::Compact));
+    return cells.join(QLatin1Char(','));
 }
 
 void VirtualDesktopManager::setRows(uint rows)
@@ -1333,14 +1352,20 @@ void VirtualDesktopManager::load()
         }
     }
 
-    // Seed empty per-activity maps from __default__ so that activities created
-    // before spatial mode was enabled (or whose JSON files are empty) inherit
-    // the default layout rather than appearing blank.
+    // Merge missing desktop entries from __default__ into per-activity maps.
+    // This handles two cases:
+    // (1) Per-activity file is completely empty → gets all entries from default
+    // (2) Per-activity file is stale (e.g. a new desktop was added to default
+    //     but the per-activity file was never updated) → gets the new entries
     const auto &defaultMap = m_spatialMaps[defaultActivityKey()];
     if (!defaultMap.isEmpty()) {
         for (auto it = m_spatialMaps.begin(); it != m_spatialMaps.end(); ++it) {
-            if (it.key() != defaultActivityKey() && it.value().isEmpty()) {
-                it.value() = defaultMap;
+            if (it.key() != defaultActivityKey()) {
+                if (it.value().isEmpty()) {
+                    it.value() = defaultMap;
+                } else {
+                    it.value().mergeFrom(defaultMap);
+                }
             }
         }
     }
