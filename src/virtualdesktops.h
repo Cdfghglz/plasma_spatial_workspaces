@@ -738,6 +738,7 @@ private:
     VirtualDesktopSpatialMap m_pendingSpatialMap;
     bool m_spatialMode = false;
     int m_batchSpatialDepth = 0;
+    bool m_updatingLayout = false;
     // TODO: QPointer
     NETRootInfo *m_rootInfo;
     KWaylandServer::PlasmaVirtualDesktopManagementInterface *m_virtualDesktopManagement = nullptr;

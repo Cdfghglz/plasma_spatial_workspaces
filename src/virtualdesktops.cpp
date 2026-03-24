@@ -1075,6 +1075,7 @@ void VirtualDesktopManager::removeVirtualDesktop(VirtualDesktop *desktop)
             m_rootInfo->setDesktopName(j + 1, m_desktops[j]->name().toUtf8().data());
         }
     }
+
     // Clear the stale name at the old last position so _NET_DESKTOP_NAMES
     // doesn't retain a phantom entry (off-by-one that confuses plasmashell).
     if (m_rootInfo) {
@@ -1088,11 +1089,9 @@ void VirtualDesktopManager::removeVirtualDesktop(VirtualDesktop *desktop)
     }
 
     save();
-
     updateRootInfo();
     Q_EMIT desktopRemoved(desktop);
     Q_EMIT countChanged(m_desktops.count()+1, m_desktops.count());
-
     desktop->deleteLater();
 }
 
@@ -1264,6 +1263,14 @@ void VirtualDesktopManager::updateRootInfo()
 
 void VirtualDesktopManager::updateLayout()
 {
+    // Guard against reentrancy: the non-spatial path's setNETDesktopLayout()
+    // triggers _NET_DESKTOP_LAYOUT → X11 PropertyNotify → updateLayout().
+    // Without this guard the feedback loop floods rowsChanged D-Bus signals.
+    if (m_updatingLayout) {
+        return;
+    }
+    m_updatingLayout = true;
+
     if (m_spatialMode) {
         const auto &smap = spatialMap();
         if (!smap.isEmpty()) {
@@ -1272,9 +1279,12 @@ void VirtualDesktopManager::updateLayout()
             m_grid.updateFromSpatialMap(smap, m_desktops);
             m_rows = qMax(1, m_grid.height());
             const int columns = qMax(1, m_grid.width());
-            if (m_rootInfo) {
-                m_rootInfo->setDesktopLayout(NET::OrientationHorizontal, columns, m_rows, NET::DesktopLayoutCornerTopLeft);
-            }
+            // Do NOT call m_rootInfo->setDesktopLayout() here.
+            // updateSpatialLayout() is the single authority for writing
+            // _NET_DESKTOP_LAYOUT in spatial mode.  Writing it here would
+            // trigger an X11 PropertyNotify event that calls updateLayout()
+            // again on the next event-loop iteration, creating an infinite
+            // loop (each iteration emits rowsChanged → 100k+ D-Bus signals).
             Q_EMIT layoutChanged(columns, m_rows);
             Q_EMIT rowsChanged(m_rows);
         }
@@ -1282,6 +1292,7 @@ void VirtualDesktopManager::updateLayout()
         // If the spatial map is empty (startup race — Activities::current()
         // not yet set), the firstTime handler in initActivities() will
         // rebuild the grid once the activity is known.
+        m_updatingLayout = false;
         return;
     }
 
@@ -1303,6 +1314,7 @@ void VirtualDesktopManager::updateLayout()
     setNETDesktopLayout(orientation,
         columns, m_rows, 0 //rootInfo->desktopLayoutCorner() // Not really worth implementing right now.
     );
+    m_updatingLayout = false;
 }
 
 void VirtualDesktopManager::load()

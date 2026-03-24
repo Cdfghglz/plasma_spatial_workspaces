@@ -149,6 +149,23 @@ DesktopGridEffect::DesktopGridEffect()
     , m_gestureAction(new QAction(this))
     , m_shortcutAction(new QAction(this))
 {
+    // Debounce timer for spatialMapChanged — coalesces rapid signals
+    // (e.g. from desktop removal triggering both map change + layout update)
+    // into a single overlay rebuild on the next event loop tick.
+    m_spatialRebuildTimer = new QTimer(this);
+    m_spatialRebuildTimer->setSingleShot(true);
+    m_spatialRebuildTimer->setInterval(0);
+    connect(m_spatialRebuildTimer, &QTimer::timeout, this, [this]() {
+        if (!activated)
+            return;
+        if (!static_cast<EffectsHandlerImpl*>(effects)->isSpatialMode())
+            return;
+        setupGrid();
+        destroyTileOverlays();
+        createTileOverlays();
+        effects->addRepaintFull();
+    });
+
     initConfig<DesktopGridConfig>();
 
     // First we set up the gestures...
@@ -1522,17 +1539,11 @@ void DesktopGridEffect::slotNumberDesktopsChanged(uint old)
 
 void DesktopGridEffect::slotSpatialMapChanged()
 {
-    // When the spatial map changes while the grid is active in spatial mode,
-    // rebuild the tile overlays so that desktops removed from the current
-    // activity's map disappear from the grid immediately.
-    if (!activated)
-        return;
-    if (!static_cast<EffectsHandlerImpl*>(effects)->isSpatialMode())
-        return;
-    setupGrid();
-    destroyTileOverlays();
-    createTileOverlays();
-    effects->addRepaintFull();
+    // Debounce: multiple spatialMapChanged signals may fire in quick succession
+    // during a single desktop removal (map change + layout update + save).
+    // Defer the expensive overlay rebuild to the next event loop tick so that
+    // all signals coalesce into one rebuild.
+    m_spatialRebuildTimer->start();
 }
 
 void DesktopGridEffect::desktopsAdded(int old)
