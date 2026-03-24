@@ -1264,17 +1264,24 @@ void VirtualDesktopManager::updateRootInfo()
 
 void VirtualDesktopManager::updateLayout()
 {
-    if (m_spatialMode && !spatialMap().isEmpty()) {
-        // In spatial mode, derive the grid from the neighbor graph
-        // so that desktops appear at their spatial positions.
-        m_grid.updateFromSpatialMap(spatialMap(), m_desktops);
-        m_rows = qMax(1, m_grid.height());
-        const int columns = qMax(1, m_grid.width());
-        if (m_rootInfo) {
-            m_rootInfo->setDesktopLayout(NET::OrientationHorizontal, columns, m_rows, NET::DesktopLayoutCornerTopLeft);
+    if (m_spatialMode) {
+        const auto &smap = spatialMap();
+        if (!smap.isEmpty()) {
+            // In spatial mode, derive the grid from the neighbor graph
+            // so that desktops appear at their spatial positions.
+            m_grid.updateFromSpatialMap(smap, m_desktops);
+            m_rows = qMax(1, m_grid.height());
+            const int columns = qMax(1, m_grid.width());
+            if (m_rootInfo) {
+                m_rootInfo->setDesktopLayout(NET::OrientationHorizontal, columns, m_rows, NET::DesktopLayoutCornerTopLeft);
+            }
+            Q_EMIT layoutChanged(columns, m_rows);
+            Q_EMIT rowsChanged(m_rows);
         }
-        Q_EMIT layoutChanged(columns, m_rows);
-        Q_EMIT rowsChanged(m_rows);
+        // In spatial mode, never fall through to the dense grid builder.
+        // If the spatial map is empty (startup race — Activities::current()
+        // not yet set), the firstTime handler in initActivities() will
+        // rebuild the grid once the activity is known.
         return;
     }
 
