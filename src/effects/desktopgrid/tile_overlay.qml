@@ -32,6 +32,12 @@ Item {
                                || rightHover.containsMouse
                                || editIconHover.containsMouse
 
+    // True when the desktop has a default name ("Desktop N") — hide the label, clear the edit field.
+    property bool isDefaultName: {
+        var name = bridge ? bridge.desktopName : ""
+        return name === "" || /^Desktop \d+$/.test(name)
+    }
+
     // Name label + inline edit icon, shown when not editing
     Row {
         id: nameRow
@@ -42,6 +48,7 @@ Item {
         Text {
             id: nameLabel
             text: bridge ? bridge.desktopName : ""
+            visible: !root.isDefaultName
             color: "white"
             font.pixelSize: 18
             font.bold: true
@@ -69,7 +76,7 @@ Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 onClicked: {
-                    nameInput.text = bridge ? bridge.desktopName : ""
+                    nameInput.text = (bridge && !root.isDefaultName) ? bridge.desktopName : ""
                     nameInput.forceActiveFocus()
                     nameInput.selectAll()
                 }
@@ -87,7 +94,7 @@ Item {
         horizontalAlignment: TextInput.AlignHCenter
         visible: activeFocus
         Component.onCompleted: {
-            if (bridge) text = bridge.desktopName
+            if (bridge) text = root.isDefaultName ? "" : bridge.desktopName
         }
         onActiveFocusChanged: {
             if (bridge) bridge.setEditing(activeFocus)
@@ -101,7 +108,7 @@ Item {
             focus = false
         }
         Keys.onEscapePressed: {
-            if (bridge) text = bridge.desktopName
+            if (bridge) text = root.isDefaultName ? "" : bridge.desktopName
             focus = false
         }
     }
@@ -109,7 +116,7 @@ Item {
     Connections {
         target: bridge
         function onDesktopNameChanged() {
-            if (!nameInput.activeFocus) nameInput.text = bridge.desktopName
+            if (!nameInput.activeFocus) nameInput.text = root.isDefaultName ? "" : bridge.desktopName
         }
     }
 
@@ -118,7 +125,7 @@ Item {
     Connections {
         target: bridge
         function onEditingStartRequested() {
-            nameInput.text = bridge ? bridge.desktopName : ""
+            nameInput.text = (bridge && !root.isDefaultName) ? bridge.desktopName : ""
             nameInput.forceActiveFocus()
             nameInput.selectAll()
         }
