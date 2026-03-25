@@ -158,11 +158,8 @@ function createInDirection(direction) {
     // Rename the new desktop
     workspace.setDesktopName(newCount, newName);
 
-    // Track in per-activity maps so the name is preserved across activity switches.
-    originalDesktopNames[newCount] = newName;
-    var actId = workspace.currentActivity;
-    if (!activityDesktopNames[actId]) activityDesktopNames[actId] = {};
-    activityDesktopNames[actId][newCount] = newName;
+    // C++ VirtualDesktopManager records the name via its nameChanged handler,
+    // so no JS-side tracking is needed.
 
     // Initialize spatial map entry for new desktop
     spatialMap[newName] = { up: null, down: null, left: null, right: null };

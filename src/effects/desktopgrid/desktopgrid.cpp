@@ -72,10 +72,14 @@ public:
     int desktop() const { return m_desktop; }
 
     QString desktopName() const {
+        if (m_desktop < 1 || m_desktop > effects->numberOfDesktops())
+            return QString();
         return effects->desktopName(m_desktop);
     }
 
     void setDesktopName(const QString &name) {
+        if (m_desktop < 1 || m_desktop > effects->numberOfDesktops())
+            return;
         QString safeName = name.trimmed().isEmpty()
             ? QStringLiteral("Desktop %1").arg(m_desktop)
             : name;
