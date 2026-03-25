@@ -650,6 +650,13 @@ Q_SIGNALS:
      */
     Q_SCRIPTABLE void spatialMapChanged();
 
+    /**
+     * Emitted whenever a virtual desktop is renamed.
+     * @param desktopNum The X11 desktop number (1-based) of the renamed desktop.
+     * @param name The new name.
+     */
+    void desktopNameChanged(int desktopNum, const QString &name);
+
 private Q_SLOTS:
     /**
      * Common slot for all "Switch to Desktop n" shortcuts.

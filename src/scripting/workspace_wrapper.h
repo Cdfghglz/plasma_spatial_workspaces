@@ -180,6 +180,13 @@ Q_SIGNALS:
      */
     void spatialMapChanged();
 
+    /**
+     * Emitted whenever a virtual desktop is renamed.
+     * @param desktopNum The X11 desktop number (1-based) of the renamed desktop.
+     * @param name The new name.
+     */
+    void desktopNameChanged(int desktopNum, const QString &name);
+
 public:
 //------------------------------------------------------------------
 //enums copy&pasted from kwinglobals.h because qtscript is evil

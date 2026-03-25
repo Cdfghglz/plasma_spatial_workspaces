@@ -121,12 +121,31 @@ function currentDesktopName() {
 /**
  * Capture the current global desktop names as the baseline for all activities.
  * Called once on first init, before any per-activity renaming has occurred.
+ * Also eagerly seeds activityDesktopNames for all known activities so that
+ * applyNamesForActivity() has a correct baseline even for activities that are
+ * never explicitly visited (avoiding the || originalDesktopNames fallback being
+ * needed for activities that may have been visited in a prior session).
  */
 function captureOriginalNames() {
     var count = workspace.desktops;
     originalDesktopNames = {};
     for (var i = 1; i <= count; i++) {
         originalDesktopNames[i] = workspace.desktopName(i);
+    }
+
+    // Eagerly seed all known activities with the original names as their baseline.
+    // This ensures activities never explicitly visited have consistent starting names
+    // regardless of signal ordering or startup races.
+    var activities = workspace.activities;
+    for (var a = 0; a < activities.length; a++) {
+        var actId = activities[a];
+        if (!activityDesktopNames[actId]) {
+            var seed = {};
+            for (var i = 1; i <= count; i++) {
+                seed[i] = originalDesktopNames[i];
+            }
+            activityDesktopNames[actId] = seed;
+        }
     }
 }
 
