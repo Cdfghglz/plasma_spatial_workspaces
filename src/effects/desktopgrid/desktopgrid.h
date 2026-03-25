@@ -180,6 +180,7 @@ private:
     QVector<OffscreenQuickScene*> m_tileOverlays;
     QVector<TileOverlayBridge*> m_tileBridges;
     OffscreenQuickScene *m_editingTileOverlay = nullptr; // overlay with active TextInput
+    OffscreenQuickScene *m_headerOverlay = nullptr;      // single activity name header above grid
     bool m_tileOverlayGeometryDirty = false; // set when grid/overlays change, cleared after update
     QTimer *m_spatialRebuildTimer = nullptr; // debounce spatialMapChanged → overlay rebuild
     QTimer *m_singleClickTimer = nullptr;    // defer single-click exit to allow double-click rename

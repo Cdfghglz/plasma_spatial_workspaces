@@ -430,6 +430,11 @@ void DesktopGridEffect::paintScreen(int mask, const QRegion &region, ScreenPaint
                 view->rootItem()->setOpacity(opacity);
             effects->renderOffscreenQuickView(view);
         }
+        if (m_headerOverlay && m_headerOverlay->rootItem()) {
+            if (m_headerOverlay->rootItem()->opacity() != opacity)
+                m_headerOverlay->rootItem()->setOpacity(opacity);
+            effects->renderOffscreenQuickView(m_headerOverlay);
+        }
     }
 
     if (isUsingPresentWindows() && windowMove && wasWindowMove) {
@@ -1791,6 +1796,24 @@ void DesktopGridEffect::createTileOverlays()
         m_tileOverlays.append(view);
     }
 
+    // Create single activity name header overlay above the grid
+    const QString headerQmlPath = QStandardPaths::locate(
+        QStandardPaths::GenericDataLocation,
+        QStringLiteral("kwin/effects/desktopgrid/grid_header.qml"));
+    if (!headerQmlPath.isEmpty() && !m_tileBridges.isEmpty()) {
+        m_headerOverlay = new OffscreenQuickScene(this);
+        connect(m_headerOverlay, &OffscreenQuickView::repaintNeeded, this, []() {
+            effects->addRepaintFull();
+        });
+        m_headerOverlay->rootContext()->setContextProperty(QStringLiteral("bridge"), m_tileBridges.first());
+        m_headerOverlay->setSource(QUrl::fromLocalFile(headerQmlPath));
+        if (!m_headerOverlay->rootItem()) {
+            qWarning() << "DesktopGridEffect: failed to load grid_header.qml";
+            delete m_headerOverlay;
+            m_headerOverlay = nullptr;
+        }
+    }
+
     m_tileOverlayGeometryDirty = true;
     updateTileOverlayGeometry();
 }
@@ -1802,6 +1825,8 @@ void DesktopGridEffect::destroyTileOverlays()
     m_tileOverlays.clear();
     qDeleteAll(m_tileBridges);
     m_tileBridges.clear();
+    delete m_headerOverlay;
+    m_headerOverlay = nullptr;
 }
 
 void DesktopGridEffect::updateTileOverlayGeometry()
@@ -1865,6 +1890,24 @@ void DesktopGridEffect::updateTileOverlayGeometry()
         // safe to make the view visible.  show() is idempotent — calling it on
         // an already-visible view is a no-op.
         m_tileOverlays[i]->show();
+    }
+
+    // Position the activity name header above the top row of tiles
+    if (m_headerOverlay) {
+        const int headerHeight = 36;
+        const int headerGap = 8;
+        const double totalGridWidth = tileSize.width() * gridSize.width()
+                                      + m_effectiveBorder * (gridSize.width() - 1);
+        const QRect headerRect(
+            qRound(offset.x()),
+            qRound(offset.y()) - headerHeight - headerGap,
+            qRound(totalGridWidth),
+            headerHeight);
+        if (headerRect.width() >= 1 && headerRect.height() >= 1) {
+            if (m_headerOverlay->geometry() != headerRect)
+                m_headerOverlay->setGeometry(headerRect);
+            m_headerOverlay->show();
+        }
     }
 }
 

@@ -3,6 +3,7 @@
 install(FILES
     main.qml
     tile_overlay.qml
+    grid_header.qml
     DESTINATION ${KDE_INSTALL_DATADIR}/kwin/effects/desktopgrid/)
 
 set(desktopgrid_SOURCES
