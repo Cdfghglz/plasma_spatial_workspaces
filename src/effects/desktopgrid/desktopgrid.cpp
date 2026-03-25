@@ -37,6 +37,9 @@
 #include <QQmlContext>
 #include <KWaylandServer/surface_interface.h>
 
+#include <KActivities/Consumer>
+#include <KActivities/Info>
+
 #include <cmath>
 
 namespace KWin
@@ -57,9 +60,14 @@ class TileOverlayBridge : public QObject
     Q_PROPERTY(bool hasBelow READ hasBelow NOTIFY neighborsChanged)
     Q_PROPERTY(bool hasLeft  READ hasLeft  NOTIFY neighborsChanged)
     Q_PROPERTY(bool hasRight READ hasRight NOTIFY neighborsChanged)
+    Q_PROPERTY(QString activityName READ activityName NOTIFY activityNameChanged)
 public:
     explicit TileOverlayBridge(int desktop, QObject *parent = nullptr)
-        : QObject(parent), m_desktop(desktop) {}
+        : QObject(parent), m_desktop(desktop)
+    {
+        connect(&m_activityConsumer, &KActivities::Consumer::currentActivityChanged,
+                this, [this](const QString &) { Q_EMIT activityNameChanged(); });
+    }
 
     int desktop() const { return m_desktop; }
 
@@ -94,6 +102,13 @@ public:
     bool hasLeft()  const { return hasSpatialNeighbor(VirtualDesktopSpatialMap::Direction::Left);  }
     bool hasRight() const { return hasSpatialNeighbor(VirtualDesktopSpatialMap::Direction::Right); }
 
+    QString activityName() const {
+        const QString id = m_activityConsumer.currentActivity();
+        if (id.isEmpty())
+            return QString();
+        return KActivities::Info(id).name();
+    }
+
     Q_INVOKABLE void addDesktopInDirection(const QString &direction) {
         Q_EMIT addDesktopRequested(m_desktop, direction);
     }
@@ -109,6 +124,7 @@ Q_SIGNALS:
     void desktopNameChanged();
     void totalDesktopsChanged();
     void neighborsChanged();
+    void activityNameChanged();
     void addDesktopRequested(int desktop, const QString &direction);
     void editingChanged(bool editing);
     void editingStartRequested();
@@ -123,6 +139,7 @@ private:
 
     int m_desktop;
     std::function<void()> m_removeCallback;
+    KActivities::Consumer m_activityConsumer;
 };
 
 // ---- DesktopGridEffect ----

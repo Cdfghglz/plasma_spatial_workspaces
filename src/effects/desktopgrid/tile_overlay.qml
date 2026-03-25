@@ -32,6 +32,19 @@ Item {
                                || rightHover.containsMouse
                                || editIconHover.containsMouse
 
+    // Activity name label at top of tile
+    Text {
+        id: activityLabel
+        anchors { top: parent.top; horizontalCenter: parent.horizontalCenter; topMargin: 6 }
+        text: bridge ? bridge.activityName : ""
+        color: "white"
+        font.pixelSize: 12
+        font.bold: true
+        style: Text.Outline
+        styleColor: "black"
+        visible: text.length > 0
+    }
+
     // Name label + inline edit icon, shown when not editing
     Row {
         id: nameRow
@@ -43,7 +56,7 @@ Item {
             id: nameLabel
             text: bridge ? bridge.desktopName : ""
             color: "white"
-            font.pixelSize: 14
+            font.pixelSize: 18
             font.bold: true
             style: Text.Outline
             styleColor: "black"
@@ -82,7 +95,7 @@ Item {
         anchors.centerIn: parent
         width: parent.width - 16
         color: "white"
-        font.pixelSize: 14
+        font.pixelSize: 18
         font.bold: true
         horizontalAlignment: TextInput.AlignHCenter
         visible: activeFocus
