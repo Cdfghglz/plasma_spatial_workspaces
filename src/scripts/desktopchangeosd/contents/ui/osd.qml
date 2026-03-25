@@ -26,6 +26,7 @@ Item {
     property string activityName: ""
     property string lastActivityId: ""
     property bool dialogsVisible: false
+    property int nameRevision: 0
     property int gridColumns: 1
     property int gridRows: 1
     property int gridModel: 0
@@ -138,6 +139,7 @@ Item {
             }
         }
 
+        root.nameRevision++;
         root.dialogsVisible = true;
         timer.start();
     }
@@ -381,6 +383,7 @@ Item {
                                     property int nameChangeCounter: 0
                                     property string tileDesktopName: {
                                         void(nameChangeCounter)
+                                        void(root.nameRevision)
                                         return desktopIndex >= 0 ? workspace.desktopName(desktopIndex + 1) : ""
                                     }
                                     property bool isDefaultName: /^Desktop \d+$/.test(tileDesktopName) || tileDesktopName === ""
