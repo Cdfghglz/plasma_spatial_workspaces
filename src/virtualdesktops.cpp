@@ -223,23 +223,35 @@ bool VirtualDesktopSpatialMap::containsDesktop(const QString &desktopId) const
 void VirtualDesktopSpatialMap::mergeFrom(const VirtualDesktopSpatialMap &other)
 {
     // Merge entries from @p other into this map.
-    // - Missing desktops are added wholesale.
+    // - Missing desktops are added wholesale (unless tombstoned).
     // - For existing desktops, empty neighbor slots are filled from @p other
     //   (non-empty slots are NOT overwritten).
     // - Tombstoned desktops are never re-added, preserving deliberate removals.
+    // - Neighbor references TO tombstoned desktops are never merged in,
+    //   preventing stale links that would cause the grid to include hidden desktops.
     for (auto it = other.m_neighbors.constBegin(); it != other.m_neighbors.constEnd(); ++it) {
         if (m_tombstones.contains(it.key())) {
             continue; // deliberately removed from this activity — do not re-add
         }
         if (!m_neighbors.contains(it.key())) {
-            m_neighbors[it.key()] = it.value();
+            // Add missing desktop wholesale, but filter out references to tombstoned neighbors.
+            DesktopNeighbors entry = it.value();
+            if (m_tombstones.contains(entry.above)) entry.above.clear();
+            if (m_tombstones.contains(entry.below)) entry.below.clear();
+            if (m_tombstones.contains(entry.left))  entry.left.clear();
+            if (m_tombstones.contains(entry.right)) entry.right.clear();
+            m_neighbors[it.key()] = entry;
         } else {
             auto &local = m_neighbors[it.key()];
             const auto &remote = it.value();
-            if (local.above.isEmpty() && !remote.above.isEmpty()) local.above = remote.above;
-            if (local.below.isEmpty() && !remote.below.isEmpty()) local.below = remote.below;
-            if (local.left.isEmpty()  && !remote.left.isEmpty())  local.left  = remote.left;
-            if (local.right.isEmpty() && !remote.right.isEmpty()) local.right = remote.right;
+            if (local.above.isEmpty() && !remote.above.isEmpty() && !m_tombstones.contains(remote.above))
+                local.above = remote.above;
+            if (local.below.isEmpty() && !remote.below.isEmpty() && !m_tombstones.contains(remote.below))
+                local.below = remote.below;
+            if (local.left.isEmpty()  && !remote.left.isEmpty()  && !m_tombstones.contains(remote.left))
+                local.left  = remote.left;
+            if (local.right.isEmpty() && !remote.right.isEmpty() && !m_tombstones.contains(remote.right))
+                local.right = remote.right;
         }
     }
 }
@@ -390,6 +402,21 @@ void VirtualDesktopSpatialMap::loadJson(const QString &filePath)
         apply(QStringLiteral("below"), Direction::Below);
         apply(QStringLiteral("left"),  Direction::Left);
         apply(QStringLiteral("right"), Direction::Right);
+    }
+
+    // Clean up stale neighbor references to tombstoned desktops.
+    // The JSON file may contain neighbor links pointing to a desktop that was
+    // later tombstoned (e.g. Desktop 8 still has below=Desktop10 after D10
+    // was removed from this activity).  Without this cleanup, BFS in
+    // updateFromSpatialMap() follows the stale link and includes the
+    // tombstoned desktop in the grid, producing wrong grid dimensions.
+    for (const QString &tombId : m_tombstones) {
+        for (auto &entry : m_neighbors) {
+            if (entry.above == tombId) entry.above.clear();
+            if (entry.below == tombId) entry.below.clear();
+            if (entry.left  == tombId) entry.left.clear();
+            if (entry.right == tombId) entry.right.clear();
+        }
     }
 }
 
