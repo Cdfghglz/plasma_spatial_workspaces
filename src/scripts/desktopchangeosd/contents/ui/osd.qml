@@ -385,6 +385,7 @@ Item {
                                 }
 
                                 Text {
+                                    id: tileNameText
                                     property int nameChangeCounter: 0
                                     property string tileDesktopName: {
                                         void(nameChangeCounter)
@@ -407,7 +408,7 @@ Item {
                                         target: workspace
                                         function onDesktopNameChanged(desktopNum, name) {
                                             if (desktopNum === desktopIndex + 1)
-                                                nameChangeCounter++
+                                                tileNameText.nameChangeCounter++
                                         }
                                     }
                                 }
