@@ -378,7 +378,11 @@ Item {
                                 }
 
                                 Text {
-                                    property string tileDesktopName: desktopIndex >= 0 ? workspace.desktopName(desktopIndex + 1) : ""
+                                    property int nameChangeCounter: 0
+                                    property string tileDesktopName: {
+                                        void(nameChangeCounter)
+                                        return desktopIndex >= 0 ? workspace.desktopName(desktopIndex + 1) : ""
+                                    }
                                     property bool isDefaultName: /^Desktop \d+$/.test(tileDesktopName) || tileDesktopName === ""
                                     width: parent.width
                                     text: tileDesktopName
@@ -391,6 +395,13 @@ Item {
                                     wrapMode: Text.NoWrap
                                     elide: Text.ElideRight
                                     horizontalAlignment: Text.AlignHCenter
+                                    Connections {
+                                        target: workspace
+                                        function onDesktopNameChanged(desktopNum, name) {
+                                            if (desktopNum === desktopIndex + 1)
+                                                nameChangeCounter++
+                                        }
+                                    }
                                 }
                             }
 
