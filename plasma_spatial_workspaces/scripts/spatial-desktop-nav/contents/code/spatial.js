@@ -12,6 +12,23 @@ var spatialMap = {};
 // Computed grid positions for overview: desktopName -> { x, y }
 var gridPositions = {};
 
+// Per-activity name overlay: { activityId: { desktopNum: name } }
+// The active activity's names are always reflected in the global KDE desktop names.
+// On activity switch we save the outgoing names and restore the incoming ones, so
+// all KWin components (OSD, tile overlay, pager, etc.) automatically show the
+// correct per-activity name without needing changes.
+var activityDesktopNames = {};
+
+// Global desktop names captured at first init, used as the baseline for activities
+// that have never had a per-activity rename.
+var originalDesktopNames = {};
+
+// Activity ID that was active on the last init/switch, used by onActivityChanged().
+var previousActivityId = "";
+
+// Guard so captureOriginalNames() and previousActivityId init run only once.
+var _firstInit = true;
+
 /**
  * Initialize the spatial map from existing desktops.
  * In spatial mode, reads neighbor relationships from KWin's VirtualDesktopManager
@@ -20,6 +37,12 @@ var gridPositions = {};
 function init() {
     spatialMap = {};
     var count = workspace.desktops;
+
+    if (_firstInit) {
+        captureOriginalNames();
+        previousActivityId = workspace.currentActivity;
+        _firstInit = false;
+    }
 
     if (workspace.spatialMode) {
         // Read neighbor relationships directly from KWin's spatial neighbor data.
@@ -96,6 +119,70 @@ function currentDesktopName() {
 }
 
 /**
+ * Capture the current global desktop names as the baseline for all activities.
+ * Called once on first init, before any per-activity renaming has occurred.
+ */
+function captureOriginalNames() {
+    var count = workspace.desktops;
+    originalDesktopNames = {};
+    for (var i = 1; i <= count; i++) {
+        originalDesktopNames[i] = workspace.desktopName(i);
+    }
+}
+
+/**
+ * Save the current global desktop names as the stored names for actId.
+ * Called just before leaving an activity so any renames (including those done
+ * via the tile overlay / C++ path) are captured.
+ */
+function saveNamesForActivity(actId) {
+    var count = workspace.desktops;
+    var saved = {};
+    for (var i = 1; i <= count; i++) {
+        saved[i] = workspace.desktopName(i);
+    }
+    activityDesktopNames[actId] = saved;
+}
+
+/**
+ * Apply the stored per-activity names for actId by setting the global KDE names.
+ * For desktops without a stored per-activity name, falls back to originalDesktopNames.
+ */
+function applyNamesForActivity(actId) {
+    var count = workspace.desktops;
+    var stored = activityDesktopNames[actId] || {};
+    for (var i = 1; i <= count; i++) {
+        var name = stored[i] || originalDesktopNames[i];
+        if (name && name !== workspace.desktopName(i)) {
+            workspace.setDesktopName(i, name);
+        }
+    }
+}
+
+/**
+ * Handle an activity switch: save the outgoing activity's names, apply the
+ * incoming activity's names, then rebuild the spatial map with the new global names.
+ * Connected to workspace.currentActivityChanged in main.qml.
+ */
+function onActivityChanged() {
+    var newActId = workspace.currentActivity;
+    if (newActId === previousActivityId) return;
+
+    // Save current global names for the activity we are leaving.
+    if (previousActivityId) {
+        saveNamesForActivity(previousActivityId);
+    }
+
+    // Apply the incoming activity's names (or fall back to originals if first visit).
+    applyNamesForActivity(newActId);
+
+    // Rebuild the spatial map so its keys reflect the newly-applied global names.
+    init();
+
+    previousActivityId = newActId;
+}
+
+/**
  * Navigate in a direction. Returns true if navigation happened.
  */
 function navigate(direction) {
@@ -142,6 +229,12 @@ function createInDirection(direction) {
 
     // Rename the new desktop
     workspace.setDesktopName(newCount, newName);
+
+    // Track in per-activity maps so the name is preserved across activity switches.
+    originalDesktopNames[newCount] = newName;
+    var actId = workspace.currentActivity;
+    if (!activityDesktopNames[actId]) activityDesktopNames[actId] = {};
+    activityDesktopNames[actId][newCount] = newName;
 
     // Initialize spatial map entry for new desktop
     spatialMap[newName] = { up: null, down: null, left: null, right: null };
@@ -295,7 +388,10 @@ function getGhostPositions() {
 }
 
 /**
- * Rename a desktop. Updates KDE and the spatial map.
+ * Rename a desktop in the current activity.
+ * Sets the global KDE name (so all components display it immediately) and records
+ * the name in activityDesktopNames so it is restored when returning to this activity
+ * after visiting another one.
  * Returns true on success.
  */
 function renameDesktop(oldName, newName) {
@@ -305,8 +401,15 @@ function renameDesktop(oldName, newName) {
     var num = desktopNumberByName(oldName);
     if (num === 0) return false;
 
-    // Rename in KDE
+    // Rename in KDE globally (onActivityChanged will restore per-activity names on switch).
     workspace.setDesktopName(num, newName);
+
+    // Record so we can restore this name when returning to this activity.
+    var actId = workspace.currentActivity;
+    if (!activityDesktopNames[actId]) {
+        activityDesktopNames[actId] = {};
+    }
+    activityDesktopNames[actId][num] = newName;
 
     // Update spatial map: copy entry under new key
     spatialMap[newName] = spatialMap[oldName];

@@ -28,6 +28,9 @@ PLUGIN_PATH="${INSTALL_PREFIX}/lib/x86_64-linux-gnu/plugins"
 KWIN_BIN="${INSTALL_PREFIX}/bin/kwin_x11"
 RESTART_SCRIPT="${HOME}/scripts/restart_plasma_kwin.sh"
 
+# Root of the plasma_spatial_workspaces project (two levels up from dev/psw).
+PSW_ROOT="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
+
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 ok()   { echo "  [OK]   $*"; }
@@ -165,6 +168,16 @@ cmd_deploy() {
             cp -r "${INSTALL_PREFIX}/share/kwin/${subdir}/." "${user_data}/${subdir}/"
         fi
     done
+
+    # spatial-desktop-nav is a standalone KWin script (not part of the cmake build).
+    # Sync it directly from the project source tree.
+    local nav_src="${PSW_ROOT}/plasma_spatial_workspaces/scripts/spatial-desktop-nav"
+    local nav_dst="${user_data}/scripts/spatial-desktop-nav"
+    if [[ -d "${nav_src}" ]]; then
+        mkdir -p "${nav_dst}"
+        cp -r "${nav_src}/." "${nav_dst}/"
+        echo "    Synced spatial-desktop-nav → ${nav_dst}/"
+    fi
 
     # restart_plasma_kwin.sh sets QT_PLUGIN_PATH correctly.
     # XDG_DATA_DIRS ensures kwin loads scripts/effects data (QML, metadata) from

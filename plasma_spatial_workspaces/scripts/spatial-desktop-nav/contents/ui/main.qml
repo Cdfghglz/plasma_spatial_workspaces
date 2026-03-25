@@ -105,4 +105,15 @@ Item {
             }
         }
     }
+
+    // Swap per-activity desktop names when the user switches activities.
+    // This makes the global KDE names reflect the active activity's names, so all
+    // KWin components (OSD, desktop grid tile overlay, pager, etc.) automatically
+    // show the correct per-activity name without needing individual changes.
+    Connections {
+        target: workspace
+        function onCurrentActivityChanged() {
+            Spatial.onActivityChanged();
+        }
+    }
 }
