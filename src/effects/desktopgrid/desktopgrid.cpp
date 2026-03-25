@@ -76,11 +76,14 @@ public:
     }
 
     void setDesktopName(const QString &name) {
-        if (name == effects->desktopName(m_desktop))
+        QString safeName = name.trimmed().isEmpty()
+            ? QStringLiteral("Desktop %1").arg(m_desktop)
+            : name;
+        if (safeName == effects->desktopName(m_desktop))
             return;
         VirtualDesktop *vd = VirtualDesktopManager::self()->desktopForX11Id(m_desktop);
         if (vd)
-            vd->setName(name);
+            vd->setName(safeName);
         Q_EMIT desktopNameChanged();
     }
 

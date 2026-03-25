@@ -106,7 +106,11 @@ Item {
             if (bridge) bridge.setEditing(activeFocus)
         }
         onAccepted: {
-            if (bridge) bridge.desktopName = text
+            var name = text.trim()
+            if (name === "" && bridge) {
+                name = "Desktop " + bridge.desktop
+            }
+            if (bridge) bridge.desktopName = name
             focus = false
         }
         Keys.onEscapePressed: {
