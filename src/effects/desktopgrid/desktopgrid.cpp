@@ -1370,8 +1370,15 @@ void DesktopGridEffect::setupGrid()
     const QList<EffectScreen *> screens = effects->screens();
     for (EffectScreen *screen : screens) {
         QRect geom = effects->clientArea(ScreenArea, screen, effects->currentDesktop());
+        // Reserve vertical space for the activity name header placed above the grid.
+        // The header is headerHeight (36) + headerGap (8) = 44px tall.  Without this
+        // reserve, a grid that fills the screen height positions its top row at y≈0
+        // and the header ends up at a negative y (off-screen).  By subtracting the
+        // reserve from the available height we shrink the tiles just enough so that
+        // the grid+header unit can be centered as a whole on screen.
+        const double headerReserve = 36.0 + 8.0; // headerHeight + headerGap (must match updateTileOverlayGeometry)
         double sScaleX = (geom.width() - m_effectiveBorder * (gridSize.width() + 1)) / double(geom.width() * gridSize.width());
-        double sScaleY = (geom.height() - m_effectiveBorder * (gridSize.height() + 1)) / double(geom.height() * gridSize.height());
+        double sScaleY = ((geom.height() - headerReserve) - m_effectiveBorder * (gridSize.height() + 1)) / double(geom.height() * gridSize.height());
         double sScale = qMin(sScaleX, sScaleY);
         if (sScale <= 0.0) sScale = 0.01; // guard against degenerate grids
         double sBorder = m_effectiveBorder / sScale;
@@ -1381,7 +1388,7 @@ void DesktopGridEffect::setupGrid()
         );
         QPointF offset(
             geom.x() + (geom.width() - size.width() * gridSize.width() - m_effectiveBorder *(gridSize.width() - 1)) / 2.0,
-            geom.y() + (geom.height() - size.height() * gridSize.height() - m_effectiveBorder *(gridSize.height() - 1)) / 2.0
+            geom.y() + headerReserve + (geom.height() - headerReserve - size.height() * gridSize.height() - m_effectiveBorder *(gridSize.height() - 1)) / 2.0
         );
         scale[screen] = sScale;
         unscaledBorder[screen] = sBorder;
