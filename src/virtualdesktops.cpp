@@ -349,7 +349,7 @@ void VirtualDesktopSpatialMap::save(KConfigGroup &group, const QStringList &know
     }
 }
 
-void VirtualDesktopSpatialMap::loadJson(const QString &filePath)
+void VirtualDesktopSpatialMap::loadJson(const QString &filePath, QHash<QString, QString> *outNames)
 {
     QFile file(filePath);
     if (!file.exists()) {
@@ -375,6 +375,19 @@ void VirtualDesktopSpatialMap::loadJson(const QString &filePath)
     const QJsonObject root = doc.object();
     for (auto it = root.constBegin(); it != root.constEnd(); ++it) {
         const QString key = it.key();
+        // "_names" stores per-activity desktop names (desktopId → name).
+        if (key == QStringLiteral("_names")) {
+            if (outNames && it.value().isObject()) {
+                const QJsonObject namesObj = it.value().toObject();
+                for (auto nit = namesObj.constBegin(); nit != namesObj.constEnd(); ++nit) {
+                    const QString name = nit.value().toString();
+                    if (!name.isEmpty()) {
+                        (*outNames)[nit.key()] = name;
+                    }
+                }
+            }
+            continue;
+        }
         // "removed" is a special array of tombstoned desktop IDs.
         if (key == QStringLiteral("removed")) {
             if (it.value().isArray()) {
@@ -420,9 +433,23 @@ void VirtualDesktopSpatialMap::loadJson(const QString &filePath)
     }
 }
 
-void VirtualDesktopSpatialMap::saveJson(const QString &filePath, const QStringList &knownIds) const
+void VirtualDesktopSpatialMap::saveJson(const QString &filePath, const QStringList &knownIds,
+                                        const QHash<QString, QString> &names) const
 {
     QJsonObject root;
+
+    // Write per-activity desktop names (desktopId → customName).
+    if (!names.isEmpty()) {
+        QJsonObject namesObj;
+        for (auto it = names.constBegin(); it != names.constEnd(); ++it) {
+            if (knownIds.contains(it.key())) {
+                namesObj[it.key()] = it.value();
+            }
+        }
+        if (!namesObj.isEmpty()) {
+            root[QStringLiteral("_names")] = namesObj;
+        }
+    }
 
     // Write tombstoned desktop IDs so they survive a kwin restart.
     // Only persist tombstones for desktops that still exist globally; stale
@@ -661,6 +688,17 @@ static const QString &defaultActivityKey()
     return key;
 }
 
+QString VirtualDesktopManager::currentActivityId() const
+{
+    if (Activities *activities = Activities::self()) {
+        const QString actId = activities->current();
+        if (!actId.isEmpty()) {
+            return actId;
+        }
+    }
+    return defaultActivityKey();
+}
+
 VirtualDesktopSpatialMap &VirtualDesktopManager::activeSpatialMap()
 {
     if (Activities *activities = Activities::self()) {
@@ -716,8 +754,37 @@ void VirtualDesktopManager::initActivities()
         // When the current activity changes, the active spatial map changes too.
         // Re-compute the grid layout and notify callers (e.g. KWin scripts via D-Bus).
         connect(activities, &Activities::currentChanged, this,
-                [this, firstTime = true](const QString &) mutable {
+                [this, firstTime = true, prevActivityId = QString()](const QString &newActivityId) mutable {
                     if (m_spatialMode) {
+                        // --- Per-activity desktop name handling ---
+                        // Save outgoing activity's current desktop names.
+                        if (!prevActivityId.isEmpty()) {
+                            QHash<QString, QString> outgoing;
+                            for (const VirtualDesktop *vd : qAsConst(m_desktops)) {
+                                outgoing[vd->id()] = vd->name();
+                            }
+                            m_activityNames[prevActivityId] = outgoing;
+                        }
+                        // Apply incoming activity's desktop names.
+                        {
+                            auto nameIt = m_activityNames.constFind(newActivityId);
+                            if (nameIt != m_activityNames.constEnd()) {
+                                m_applyingActivityNames = true;
+                                for (VirtualDesktop *vd : qAsConst(m_desktops)) {
+                                    auto n = nameIt->constFind(vd->id());
+                                    if (n != nameIt->constEnd()) {
+                                        vd->setName(n.value());
+                                    } else {
+                                        vd->setName(defaultName(vd->x11DesktopNumber()));
+                                    }
+                                }
+                                m_applyingActivityNames = false;
+                            }
+                        }
+                        prevActivityId = newActivityId;
+                        // Persist the outgoing names we just captured.
+                        save();
+
                         if (firstTime) {
                             // First currentChanged after startup: the activity
                             // was unknown during load() so updateLayout() could
@@ -758,6 +825,7 @@ void VirtualDesktopManager::initActivities()
 void VirtualDesktopManager::slotActivityRemoved(const QString &activityId)
 {
     m_spatialMaps.remove(activityId);
+    m_activityNames.remove(activityId);
     const QString path = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
         + QStringLiteral("/spatial-desktop-nav-") + activityId + QStringLiteral(".json");
     QFile::remove(path);
@@ -1071,6 +1139,10 @@ VirtualDesktop *VirtualDesktopManager::createVirtualDesktop(uint position, const
             if (m_rootInfo) {
                 m_rootInfo->setDesktopName(vd->x11DesktopNumber(), vd->name().toUtf8().data());
             }
+            if (!s_loadingDesktopSettings && !m_applyingActivityNames) {
+                const QString actId = currentActivityId();
+                m_activityNames[actId][vd->id()] = vd->name();
+            }
             save();
             if (!s_loadingDesktopSettings) {
                 Q_EMIT desktopNameChanged(vd->x11DesktopNumber(), vd->name());
@@ -1245,6 +1317,10 @@ void VirtualDesktopManager::setCount(uint count)
                 [this, vd] {
                     if (m_rootInfo) {
                         m_rootInfo->setDesktopName(vd->x11DesktopNumber(), vd->name().toUtf8().data());
+                    }
+                    if (!s_loadingDesktopSettings && !m_applyingActivityNames) {
+                        const QString actId = currentActivityId();
+                        m_activityNames[actId][vd->id()] = vd->name();
                     }
                     save();
                     if (!s_loadingDesktopSettings) {
@@ -1446,7 +1522,11 @@ void VirtualDesktopManager::load()
             activityFilePrefix.length(),
             fileName.length() - activityFilePrefix.length() - 5); // strip prefix and ".json"
         if (!activityId.isEmpty()) {
-            m_spatialMaps[activityId].loadJson(configDir + QLatin1Char('/') + fileName);
+            QHash<QString, QString> names;
+            m_spatialMaps[activityId].loadJson(configDir + QLatin1Char('/') + fileName, &names);
+            if (!names.isEmpty()) {
+                m_activityNames[activityId] = names;
+            }
         }
     }
 
@@ -1475,7 +1555,7 @@ void VirtualDesktopManager::load()
 
 void VirtualDesktopManager::save()
 {
-    if (s_loadingDesktopSettings) {
+    if (s_loadingDesktopSettings || m_applyingActivityNames) {
         return;
     }
     if (!m_config) {
@@ -1546,7 +1626,18 @@ void VirtualDesktopManager::save()
         }
         const QString path = configDir + QStringLiteral("/spatial-desktop-nav-")
             + it.key() + QStringLiteral(".json");
-        it.value().saveJson(path, knownIds);
+        // Pass per-activity desktop names (only non-default names).
+        const auto nameIt = m_activityNames.constFind(it.key());
+        QHash<QString, QString> customNames;
+        if (nameIt != m_activityNames.constEnd()) {
+            for (auto nit = nameIt->constBegin(); nit != nameIt->constEnd(); ++nit) {
+                VirtualDesktop *vd = desktopForId(nit.key());
+                if (vd && nit.value() != defaultName(vd->x11DesktopNumber())) {
+                    customNames[nit.key()] = nit.value();
+                }
+            }
+        }
+        it.value().saveJson(path, knownIds, customNames);
     }
 }
 

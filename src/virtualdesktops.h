@@ -182,14 +182,15 @@ public:
      * "above", "below", "left", "right". On success, replaces the current
      * in-memory map. Silently does nothing if the file does not exist.
      */
-    void loadJson(const QString &filePath);
+    void loadJson(const QString &filePath, QHash<QString, QString> *outNames = nullptr);
 
     /**
      * Saves spatial neighbor entries to a JSON file at @p filePath.
      * Only entries for desktop IDs in @p knownIds are written; stale entries
      * are omitted. Creates or overwrites the file atomically via a temp file.
      */
-    void saveJson(const QString &filePath, const QStringList &knownIds) const;
+    void saveJson(const QString &filePath, const QStringList &knownIds,
+                  const QHash<QString, QString> &names = QHash<QString, QString>()) const;
 
     /**
      * @returns true if the spatial map has no explicit neighbor entries and no tombstones.
@@ -722,6 +723,11 @@ private:
      */
     const VirtualDesktopSpatialMap &activeSpatialMap() const;
     /**
+     * @returns The current activity ID, or defaultActivityKey() if Activities
+     * are not available or the current activity is not yet known.
+     */
+    QString currentActivityId() const;
+    /**
      * @returns A default name for the given @p desktop
      */
     QString defaultName(int desktop) const;
@@ -761,6 +767,14 @@ private:
     // Throwaway map for writes when Activities is present but current() is not yet set.
     // Data written here is intentionally discarded; it is never saved to disk.
     VirtualDesktopSpatialMap m_pendingSpatialMap;
+    // Per-activity desktop names: activityId → (desktopId → customName).
+    // Persisted in the per-activity spatial JSON files as "_names": {...}.
+    // On activity switch, outgoing names are saved here and incoming names
+    // are applied to the global VirtualDesktop objects.
+    QHash<QString, QHash<QString, QString>> m_activityNames;
+    // Guard: suppresses save() and m_activityNames updates while applying
+    // names during an activity switch to avoid feedback loops.
+    bool m_applyingActivityNames = false;
     bool m_spatialMode = false;
     int m_batchSpatialDepth = 0;
     bool m_updatingLayout = false;
