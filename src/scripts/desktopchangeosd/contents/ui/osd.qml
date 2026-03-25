@@ -129,6 +129,11 @@ Item {
         if (root.showGrid) {
             root.gridColumns = workspace.desktopGridWidth;
             root.gridRows = workspace.desktopGridHeight;
+            // Force Repeater to destroy and recreate all items so
+            // workspace.desktopName() calls always return current names.
+            // Without this, stale bindings persist because desktopName()
+            // is an imperative function call with no QML change notification.
+            root.gridModel = 0;
             if (workspace.spatialMode) {
                 var grid = root.buildSpatialGrid();
                 root.spatialCells = grid;
