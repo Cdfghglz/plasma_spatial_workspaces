@@ -269,6 +269,18 @@ DesktopGridEffect::DesktopGridEffect()
     connect(effects, &EffectsHandler::windowFrameGeometryChanged, this, &DesktopGridEffect::slotWindowFrameGeometryChanged);
     connect(VirtualDesktopManager::self(), &VirtualDesktopManager::spatialMapChanged,
             this, &DesktopGridEffect::slotSpatialMapChanged);
+    // When a desktop is renamed (e.g. during activity switch via applyNamesForActivity),
+    // notify the matching tile bridge so the QML overlay invalidates its cached texture
+    // and re-reads the updated desktopName property immediately.
+    connect(VirtualDesktopManager::self(), &VirtualDesktopManager::desktopNameChanged,
+            this, [this](int desktopNum, const QString &) {
+                for (TileOverlayBridge *bridge : qAsConst(m_tileBridges)) {
+                    if (bridge->desktop() == desktopNum) {
+                        bridge->notifyDesktopNameChanged();
+                        break;
+                    }
+                }
+            });
     connect(effects, &EffectsHandler::screenAdded, this, &DesktopGridEffect::setup);
     connect(effects, &EffectsHandler::screenRemoved, this, &DesktopGridEffect::setup);
 
