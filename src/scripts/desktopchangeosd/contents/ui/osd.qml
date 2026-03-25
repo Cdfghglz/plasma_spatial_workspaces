@@ -351,11 +351,11 @@ Item {
                                     }
                                 }
                             }
-                            // Activity and desktop name overlaid on the selected tile
+                            // Activity name on highlighted tile only; desktop name on all tiles
                             Column {
                                 anchors.centerIn: parent
                                 width: parent.width - 4
-                                opacity: desktopIndex == root.currentDesktop ? 1.0 : 0.0
+                                opacity: desktopIndex == root.currentDesktop ? 1.0 : 0.7
                                 visible: desktopIndex >= 0
 
                                 Behavior on opacity {
@@ -365,7 +365,7 @@ Item {
                                 Text {
                                     width: parent.width
                                     text: root.activityName
-                                    visible: root.activityName.length > 0
+                                    visible: desktopIndex == root.currentDesktop && root.activityName.length > 0
                                     height: visible ? implicitHeight : 0
                                     color: "white"
                                     font.bold: true
@@ -378,8 +378,12 @@ Item {
                                 }
 
                                 Text {
+                                    property string tileDesktopName: desktopIndex >= 0 ? workspace.desktopName(desktopIndex + 1) : ""
+                                    property bool isDefaultName: /^Desktop \d+$/.test(tileDesktopName) || tileDesktopName === ""
                                     width: parent.width
-                                    text: workspace.desktopName(workspace.currentDesktop)
+                                    text: tileDesktopName
+                                    visible: !isDefaultName
+                                    height: visible ? implicitHeight : 0
                                     color: "white"
                                     style: Text.Outline
                                     styleColor: "black"
