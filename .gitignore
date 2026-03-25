@@ -79,3 +79,6 @@ kwin-5.24.7/
 kwin_5.24.7-0ubuntu0.2.debian.tar.xz
 kwin_5.24.7-0ubuntu0.2.dsc
 kwin_5.24.7.orig.tar.xz
+
+# Dolt database files (added by bd init)
+.dolt/
