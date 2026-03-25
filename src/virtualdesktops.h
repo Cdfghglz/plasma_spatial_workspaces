@@ -17,6 +17,7 @@
 #include <QPoint>
 #include <QPointer>
 #include <QQueue>
+#include <QSet>
 #include <QSize>
 #include <QVariantMap>
 
@@ -191,8 +192,11 @@ public:
     void saveJson(const QString &filePath, const QStringList &knownIds) const;
 
     /**
-     * @returns true if the spatial map has no explicit neighbor entries.
-     * An empty map means no spatial constraints have been set for this activity.
+     * @returns true if the spatial map has no explicit neighbor entries and no tombstones.
+     * An empty map with no tombstones means no spatial constraints have ever been set for
+     * this activity.  A map that has tombstones (deliberately removed desktops) is NOT
+     * considered empty — callers use this to decide whether to seed from the default map,
+     * and we must not overwrite intentional removals with the default.
      */
     bool isEmpty() const;
 
@@ -207,8 +211,18 @@ public:
      * Merge missing desktop entries from @p other into this map.
      * Existing entries are NOT overwritten — only desktops absent from
      * this map are copied from @p other.
+     * Desktops in the tombstone list are never re-added.
      */
     void mergeFrom(const VirtualDesktopSpatialMap &other);
+
+    /**
+     * Records @p desktopId as deliberately removed from this activity's map.
+     * Tombstoned desktops are skipped by mergeFrom(), preventing them from
+     * being re-added on kwin restart via the default-map merge.
+     * Call this when a desktop is removed from a specific activity (not a
+     * global deletion).
+     */
+    void addTombstone(const QString &desktopId);
 
 private:
     static QString directionSuffix(Direction direction);
@@ -221,6 +235,10 @@ private:
     };
 
     QHash<QString, DesktopNeighbors> m_neighbors;
+    // Tombstones: desktop IDs deliberately removed from this activity.
+    // mergeFrom() skips these so a kwin restart does not re-add them from
+    // the default map.  Persisted in the per-activity JSON as "removed": [...].
+    QSet<QString> m_tombstones;
 };
 
 /**

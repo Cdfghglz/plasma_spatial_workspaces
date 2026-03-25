@@ -21,6 +21,7 @@
 #include <QAction>
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
@@ -209,7 +210,9 @@ void VirtualDesktopSpatialMap::removeDesktop(const QString &desktopId)
 
 bool VirtualDesktopSpatialMap::isEmpty() const
 {
-    return m_neighbors.isEmpty();
+    // A map with tombstones is NOT empty: it has been explicitly configured
+    // for this activity and must not be seeded from the default map.
+    return m_neighbors.isEmpty() && m_tombstones.isEmpty();
 }
 
 bool VirtualDesktopSpatialMap::containsDesktop(const QString &desktopId) const
@@ -223,7 +226,11 @@ void VirtualDesktopSpatialMap::mergeFrom(const VirtualDesktopSpatialMap &other)
     // - Missing desktops are added wholesale.
     // - For existing desktops, empty neighbor slots are filled from @p other
     //   (non-empty slots are NOT overwritten).
+    // - Tombstoned desktops are never re-added, preserving deliberate removals.
     for (auto it = other.m_neighbors.constBegin(); it != other.m_neighbors.constEnd(); ++it) {
+        if (m_tombstones.contains(it.key())) {
+            continue; // deliberately removed from this activity — do not re-add
+        }
         if (!m_neighbors.contains(it.key())) {
             m_neighbors[it.key()] = it.value();
         } else {
@@ -237,9 +244,15 @@ void VirtualDesktopSpatialMap::mergeFrom(const VirtualDesktopSpatialMap &other)
     }
 }
 
+void VirtualDesktopSpatialMap::addTombstone(const QString &desktopId)
+{
+    m_tombstones.insert(desktopId);
+}
+
 void VirtualDesktopSpatialMap::load(const KConfigGroup &group)
 {
     m_neighbors.clear();
+    m_tombstones.clear(); // kwinrc load is a full reset; tombstones live in JSON only
 
     // Scan for all Spatial_<uuid>_<Direction> keys in the group
     const QMap<QString, QString> entries = group.entryMap();
@@ -346,17 +359,31 @@ void VirtualDesktopSpatialMap::loadJson(const QString &filePath)
     }
 
     m_neighbors.clear();
+    m_tombstones.clear();
     const QJsonObject root = doc.object();
     for (auto it = root.constBegin(); it != root.constEnd(); ++it) {
-        const QString desktopId = it.key();
+        const QString key = it.key();
+        // "removed" is a special array of tombstoned desktop IDs.
+        if (key == QStringLiteral("removed")) {
+            if (it.value().isArray()) {
+                const QJsonArray removed = it.value().toArray();
+                for (const QJsonValue &v : removed) {
+                    const QString id = v.toString();
+                    if (!id.isEmpty()) {
+                        m_tombstones.insert(id);
+                    }
+                }
+            }
+            continue;
+        }
         if (!it.value().isObject()) {
             continue;
         }
         const QJsonObject nbr = it.value().toObject();
-        auto apply = [&](const QString &key, Direction dir) {
-            const QString neighborId = nbr.value(key).toString();
+        auto apply = [&](const QString &dirKey, Direction dir) {
+            const QString neighborId = nbr.value(dirKey).toString();
             if (!neighborId.isEmpty()) {
-                setNeighbor(desktopId, dir, neighborId);
+                setNeighbor(key, dir, neighborId);
             }
         };
         apply(QStringLiteral("above"), Direction::Above);
@@ -369,6 +396,20 @@ void VirtualDesktopSpatialMap::loadJson(const QString &filePath)
 void VirtualDesktopSpatialMap::saveJson(const QString &filePath, const QStringList &knownIds) const
 {
     QJsonObject root;
+
+    // Write tombstoned desktop IDs so they survive a kwin restart.
+    // Only persist tombstones for desktops that still exist globally; stale
+    // tombstones for already-deleted desktops are harmless but noisy.
+    QJsonArray removedArray;
+    for (const QString &id : m_tombstones) {
+        if (knownIds.contains(id)) {
+            removedArray.append(id);
+        }
+    }
+    if (!removedArray.isEmpty()) {
+        root[QStringLiteral("removed")] = removedArray;
+    }
+
     for (auto it = m_neighbors.constBegin(); it != m_neighbors.constEnd(); ++it) {
         const QString &desktopId = it.key();
         if (!knownIds.contains(desktopId)) {
@@ -712,7 +753,10 @@ bool VirtualDesktopManager::isDesktopInAnyActivityMap(const QString &desktopId) 
 
 void VirtualDesktopManager::removeDesktopFromCurrentActivityMap(const QString &desktopId)
 {
-    activeSpatialMap().removeDesktop(desktopId);
+    VirtualDesktopSpatialMap &smap = activeSpatialMap();
+    smap.removeDesktop(desktopId);
+    // Tombstone so the desktop is not re-added on restart via mergeFrom().
+    smap.addTombstone(desktopId);
     save();
     updateSpatialLayout();
     Q_EMIT spatialMapChanged();
