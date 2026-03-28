@@ -658,11 +658,11 @@ QPoint VirtualDesktopGrid::gridCoords(VirtualDesktop *vd) const
 
 VirtualDesktop *VirtualDesktopGrid::at(const QPoint &coords) const
 {
-    if (coords.y() >= m_grid.count()) {
+    if (coords.y() < 0 || coords.y() >= m_grid.count()) {
         return nullptr;
     }
     const auto &row = m_grid.at(coords.y());
-    if (coords.x() >= row.count()) {
+    if (coords.x() < 0 || coords.x() >= row.count()) {
         return nullptr;
     }
     return row.at(coords.x());
@@ -768,8 +768,8 @@ void VirtualDesktopManager::initActivities()
                         // Apply incoming activity's desktop names.
                         {
                             auto nameIt = m_activityNames.constFind(newActivityId);
+                            m_applyingActivityNames = true;
                             if (nameIt != m_activityNames.constEnd()) {
-                                m_applyingActivityNames = true;
                                 for (VirtualDesktop *vd : qAsConst(m_desktops)) {
                                     auto n = nameIt->constFind(vd->id());
                                     if (n != nameIt->constEnd()) {
@@ -778,8 +778,15 @@ void VirtualDesktopManager::initActivities()
                                         vd->setName(defaultName(vd->x11DesktopNumber()));
                                     }
                                 }
-                                m_applyingActivityNames = false;
+                            } else {
+                                // Activity has no saved names yet — reset all
+                                // desktops to defaults so the previous activity's
+                                // custom names don't leak through.
+                                for (VirtualDesktop *vd : qAsConst(m_desktops)) {
+                                    vd->setName(defaultName(vd->x11DesktopNumber()));
+                                }
                             }
+                            m_applyingActivityNames = false;
                         }
                         prevActivityId = newActivityId;
                         // Persist the outgoing names we just captured.
@@ -1144,7 +1151,7 @@ VirtualDesktop *VirtualDesktopManager::createVirtualDesktop(uint position, const
                 m_activityNames[actId][vd->id()] = vd->name();
             }
             save();
-            if (!s_loadingDesktopSettings) {
+            if (!s_loadingDesktopSettings && !m_applyingActivityNames) {
                 Q_EMIT desktopNameChanged(vd->x11DesktopNumber(), vd->name());
             }
         }
@@ -1323,7 +1330,7 @@ void VirtualDesktopManager::setCount(uint count)
                         m_activityNames[actId][vd->id()] = vd->name();
                     }
                     save();
-                    if (!s_loadingDesktopSettings) {
+                    if (!s_loadingDesktopSettings && !m_applyingActivityNames) {
                         Q_EMIT desktopNameChanged(vd->x11DesktopNumber(), vd->name());
                     }
                 }
