@@ -27,6 +27,7 @@ push-state.json
 # Worktree redirect file (contains relative path to main repo's .beads/)
 # Must not be committed as paths would be wrong in other clones
 redirect
+redirect.bak-*
 
 # Sync state (local-only, per-machine)
 # These files are machine-specific and should not be shared across clones
