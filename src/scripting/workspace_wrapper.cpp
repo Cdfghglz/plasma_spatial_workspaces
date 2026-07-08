@@ -150,15 +150,15 @@ void WorkspaceWrapper::setSpatialMode(bool enabled)
 static int spatialNeighborInDirection(int desktop, VirtualDesktopSpatialMap::Direction direction)
 {
     VirtualDesktopManager *vds = VirtualDesktopManager::self();
-    const VirtualDesktop *vd = vds->desktopForX11Id(desktop);
+    VirtualDesktop *vd = vds->desktopForX11Id(desktop);
     if (!vd) {
         return 0;
     }
-    const QString neighborId = vds->spatialMap().neighbor(vd->id(), direction);
-    if (neighborId.isEmpty()) {
-        return 0;
-    }
-    const VirtualDesktop *neighbor = vds->desktopForId(neighborId);
+    // Query the grid (query-time derived adjacency), not the raw neighbor
+    // map: the grid also reaches desktops that only have an explicit link
+    // to some *other* neighbor, as long as they end up grid-adjacent to
+    // this one (e.g. a desktop reachable only from its creator).
+    VirtualDesktop *neighbor = vds->grid().inDirection(vd, direction);
     return neighbor ? static_cast<int>(neighbor->x11DesktopNumber()) : 0;
 }
 
@@ -190,12 +190,12 @@ void WorkspaceWrapper::setSpatialNeighbor(int fromDesktop, int direction, int to
         return;
     }
 
-    VirtualDesktopSpatialMap::Direction dir;
+    QString dirStr;
     switch (direction) {
-    case 0: dir = VirtualDesktopSpatialMap::Direction::Above; break;
-    case 1: dir = VirtualDesktopSpatialMap::Direction::Below; break;
-    case 2: dir = VirtualDesktopSpatialMap::Direction::Left;  break;
-    case 3: dir = VirtualDesktopSpatialMap::Direction::Right; break;
+    case 0: dirStr = QStringLiteral("above"); break;
+    case 1: dirStr = QStringLiteral("below"); break;
+    case 2: dirStr = QStringLiteral("left");  break;
+    case 3: dirStr = QStringLiteral("right"); break;
     default: return;
     }
 
@@ -208,8 +208,21 @@ void WorkspaceWrapper::setSpatialNeighbor(int fromDesktop, int direction, int to
         toId = to->id();
     }
 
-    vds->spatialMap().setNeighbor(from->id(), dir, toId);
-    Q_EMIT spatialMapChanged();
+    // Route through the manager (not spatialMap() directly) so the grid is
+    // rebuilt and the map is saved, same as the C++ desktop-grid creation
+    // path. WorkspaceWrapper::spatialMapChanged() is already relayed from
+    // VirtualDesktopManager::spatialMapChanged(), so no explicit Q_EMIT here.
+    vds->setSpatialNeighbor(from->id(), dirStr, toId);
+}
+
+void WorkspaceWrapper::beginBatchSpatialUpdate()
+{
+    VirtualDesktopManager::self()->beginBatchSpatialUpdate();
+}
+
+void WorkspaceWrapper::endBatchSpatialUpdate()
+{
+    VirtualDesktopManager::self()->endBatchSpatialUpdate();
 }
 
 #define SLOTWRAPPER(name) \

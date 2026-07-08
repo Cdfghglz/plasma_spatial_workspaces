@@ -306,6 +306,20 @@ void setter( rettype val );
     Q_SCRIPTABLE void setSpatialNeighbor(int fromDesktop, int direction, int toDesktop);
 
     /**
+     * Defers the save/grid-rebuild/signal work that setSpatialNeighbor()
+     * would otherwise do on every call until a matching endBatchSpatialUpdate().
+     * Use when setting multiple links at once (e.g. both directions of a new
+     * desktop's positioning link) so the grid rebuilds only once.
+     */
+    Q_SCRIPTABLE void beginBatchSpatialUpdate();
+
+    /**
+     * Ends a beginBatchSpatialUpdate() block, performing the deferred
+     * save/grid-rebuild/signal work once.
+     */
+    Q_SCRIPTABLE void endBatchSpatialUpdate();
+
+    /**
      * Returns the geometry a Client can use with the specified option.
      * This method should be preferred over other methods providing screen sizes as the
      * various options take constraints such as struts set on panels into account.

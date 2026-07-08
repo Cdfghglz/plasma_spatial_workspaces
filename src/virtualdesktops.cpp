@@ -668,6 +668,23 @@ VirtualDesktop *VirtualDesktopGrid::at(const QPoint &coords) const
     return row.at(coords.x());
 }
 
+VirtualDesktop *VirtualDesktopGrid::inDirection(VirtualDesktop *vd, VirtualDesktopSpatialMap::Direction dir) const
+{
+    const QPoint coords = gridCoords(vd);
+    if (coords.x() < 0 || coords.y() < 0) {
+        return nullptr; // desktop not placed in this grid
+    }
+
+    QPoint offset;
+    switch (dir) {
+    case VirtualDesktopSpatialMap::Direction::Above: offset = QPoint(0, -1); break;
+    case VirtualDesktopSpatialMap::Direction::Below: offset = QPoint(0, 1);  break;
+    case VirtualDesktopSpatialMap::Direction::Left:  offset = QPoint(-1, 0); break;
+    case VirtualDesktopSpatialMap::Direction::Right: offset = QPoint(1, 0);  break;
+    }
+    return at(coords + offset);
+}
+
 KWIN_SINGLETON_FACTORY_VARIABLE(VirtualDesktopManager, s_manager)
 
 VirtualDesktopManager::VirtualDesktopManager(QObject *parent)
@@ -903,14 +920,10 @@ VirtualDesktop *VirtualDesktopManager::above(VirtualDesktop *desktop, bool wrap)
     }
 
     if (m_spatialMode) {
-        const QString neighborId = activeSpatialMap().neighbor(desktop->id(), VirtualDesktopSpatialMap::Direction::Above);
-        if (!neighborId.isEmpty()) {
-            VirtualDesktop *neighbor = desktopForId(neighborId);
-            if (neighbor) {
-                return neighbor;
-            }
+        if (VirtualDesktop *neighbor = m_grid.inDirection(desktop, VirtualDesktopSpatialMap::Direction::Above)) {
+            return neighbor;
         }
-        // No spatial neighbor set: stay on current desktop (no wrap in spatial mode)
+        // No grid-adjacent neighbor: stay on current desktop (no wrap in spatial mode)
         return desktop;
     }
 
@@ -946,13 +959,10 @@ VirtualDesktop *VirtualDesktopManager::toRight(VirtualDesktop *desktop, bool wra
     }
 
     if (m_spatialMode) {
-        const QString neighborId = activeSpatialMap().neighbor(desktop->id(), VirtualDesktopSpatialMap::Direction::Right);
-        if (!neighborId.isEmpty()) {
-            VirtualDesktop *neighbor = desktopForId(neighborId);
-            if (neighbor) {
-                return neighbor;
-            }
+        if (VirtualDesktop *neighbor = m_grid.inDirection(desktop, VirtualDesktopSpatialMap::Direction::Right)) {
+            return neighbor;
         }
+        // No grid-adjacent neighbor: stay on current desktop (no wrap in spatial mode)
         return desktop;
     }
 
@@ -988,13 +998,10 @@ VirtualDesktop *VirtualDesktopManager::below(VirtualDesktop *desktop, bool wrap)
     }
 
     if (m_spatialMode) {
-        const QString neighborId = activeSpatialMap().neighbor(desktop->id(), VirtualDesktopSpatialMap::Direction::Below);
-        if (!neighborId.isEmpty()) {
-            VirtualDesktop *neighbor = desktopForId(neighborId);
-            if (neighbor) {
-                return neighbor;
-            }
+        if (VirtualDesktop *neighbor = m_grid.inDirection(desktop, VirtualDesktopSpatialMap::Direction::Below)) {
+            return neighbor;
         }
+        // No grid-adjacent neighbor: stay on current desktop (no wrap in spatial mode)
         return desktop;
     }
 
@@ -1031,13 +1038,10 @@ VirtualDesktop *VirtualDesktopManager::toLeft(VirtualDesktop *desktop, bool wrap
     }
 
     if (m_spatialMode) {
-        const QString neighborId = activeSpatialMap().neighbor(desktop->id(), VirtualDesktopSpatialMap::Direction::Left);
-        if (!neighborId.isEmpty()) {
-            VirtualDesktop *neighbor = desktopForId(neighborId);
-            if (neighbor) {
-                return neighbor;
-            }
+        if (VirtualDesktop *neighbor = m_grid.inDirection(desktop, VirtualDesktopSpatialMap::Direction::Left)) {
+            return neighbor;
         }
+        // No grid-adjacent neighbor: stay on current desktop (no wrap in spatial mode)
         return desktop;
     }
 

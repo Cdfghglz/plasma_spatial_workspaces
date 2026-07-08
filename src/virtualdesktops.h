@@ -77,53 +77,14 @@ private:
 };
 
 /**
- * @brief Two dimensional grid containing the ID of the virtual desktop at a specific position
- * in the grid.
- *
- * The VirtualDesktopGrid represents a visual layout of the Virtual Desktops as they are in e.g.
- * a Pager. This grid is used for getting a desktop next to a given desktop in any direction by
- * making use of the layout information. This allows navigation like move to desktop on left.
- */
-class VirtualDesktopSpatialMap; // forward declaration for updateFromSpatialMap
-
-class VirtualDesktopGrid
-{
-public:
-    VirtualDesktopGrid();
-    ~VirtualDesktopGrid();
-    void update(const QSize &size, Qt::Orientation orientation, const QVector<VirtualDesktop*> &desktops);
-    /**
-     * Builds the grid from a spatial neighbor map by walking the graph.
-     * Desktops are placed at their spatial positions; empty cells are nullptr.
-     */
-    void updateFromSpatialMap(const VirtualDesktopSpatialMap &spatialMap, const QVector<VirtualDesktop*> &desktops);
-    /**
-     * @returns The coords of desktop @a id in grid units.
-     */
-    QPoint gridCoords(uint id) const;
-    /**
-     * @returns The coords of desktop @a vd in grid units.
-     */
-    QPoint gridCoords(VirtualDesktop *vd) const;
-    /**
-     * @returns The desktop at the point @a coords or 0 if no desktop exists at that
-     * point. @a coords is to be in grid units.
-     */
-    VirtualDesktop *at(const QPoint &coords) const;
-    int width() const;
-    int height() const;
-    const QSize &size() const;
-private:
-    QSize m_size;
-    QVector<QVector<VirtualDesktop*>> m_grid;
-};
-
-/**
  * @brief Stores explicit spatial neighbor relationships between virtual desktops.
  *
  * When spatialMode is enabled in VirtualDesktopManager, navigation methods
- * (above/below/toLeft/toRight) delegate to this map instead of computing
- * neighbors from the grid layout.
+ * (above/below/toLeft/toRight) delegate to VirtualDesktopGrid, which is built
+ * from this map (see VirtualDesktopGrid::updateFromSpatialMap()). Only one
+ * link per newly-placed desktop needs to be recorded here — a positioning
+ * spanning-tree, not a full adjacency mesh — since the grid derives every
+ * other adjacency at query time.
  *
  * Neighbor entries are persisted as Spatial_<uuid>_<Direction> keys in the
  * kwinrc [Desktops] config section. Only explicitly set neighbors are stored;
@@ -240,6 +201,58 @@ private:
     // mergeFrom() skips these so a kwin restart does not re-add them from
     // the default map.  Persisted in the per-activity JSON as "removed": [...].
     QSet<QString> m_tombstones;
+};
+
+/**
+ * @brief Two dimensional grid containing the ID of the virtual desktop at a specific position
+ * in the grid.
+ *
+ * The VirtualDesktopGrid represents a visual layout of the Virtual Desktops as they are in e.g.
+ * a Pager. This grid is used for getting a desktop next to a given desktop in any direction by
+ * making use of the layout information. This allows navigation like move to desktop on left.
+ *
+ * In spatial mode the grid is the single source of truth for adjacency: it is
+ * rebuilt from VirtualDesktopSpatialMap's (sparse) neighbor links via
+ * updateFromSpatialMap(), and all "who is adjacent to me" queries — including
+ * ones raw links were never explicitly set for — go through inDirection().
+ */
+class VirtualDesktopGrid
+{
+public:
+    VirtualDesktopGrid();
+    ~VirtualDesktopGrid();
+    void update(const QSize &size, Qt::Orientation orientation, const QVector<VirtualDesktop*> &desktops);
+    /**
+     * Builds the grid from a spatial neighbor map by walking the graph.
+     * Desktops are placed at their spatial positions; empty cells are nullptr.
+     */
+    void updateFromSpatialMap(const VirtualDesktopSpatialMap &spatialMap, const QVector<VirtualDesktop*> &desktops);
+    /**
+     * @returns The coords of desktop @a id in grid units.
+     */
+    QPoint gridCoords(uint id) const;
+    /**
+     * @returns The coords of desktop @a vd in grid units.
+     */
+    QPoint gridCoords(VirtualDesktop *vd) const;
+    /**
+     * @returns The desktop at the point @a coords or 0 if no desktop exists at that
+     * point. @a coords is to be in grid units.
+     */
+    VirtualDesktop *at(const QPoint &coords) const;
+    /**
+     * @returns The occupant of the cell orthogonally adjacent to @a vd in
+     * @a dir, or @c nullptr if that cell is vacant, out of bounds, or @a vd
+     * is not placed in the grid. Never wraps — this preserves sparse-grid
+     * gaps instead of fabricating adjacency across them.
+     */
+    VirtualDesktop *inDirection(VirtualDesktop *vd, VirtualDesktopSpatialMap::Direction dir) const;
+    int width() const;
+    int height() const;
+    const QSize &size() const;
+private:
+    QSize m_size;
+    QVector<QVector<VirtualDesktop*>> m_grid;
 };
 
 /**

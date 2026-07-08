@@ -57,6 +57,23 @@ add_test(NAME kwin-testSpatialMap COMMAND testSpatialMap)
 ecm_mark_as_test(testSpatialMap)
 
 ########################################################
+# Test VirtualDesktopGrid (query-time spatial adjacency, standalone)
+#
+# VirtualDesktopGrid depends only on VirtualDesktop::id() and
+# VirtualDesktopSpatialMap, neither of which need Activities/Workspace. The
+# test file embeds minimal copies of all three so it compiles without
+# linking the full KWin library.
+########################################################
+set(testVirtualDesktopGrid_SRCS test_virtual_desktop_grid.cpp)
+add_executable(testVirtualDesktopGrid ${testVirtualDesktopGrid_SRCS})
+target_link_libraries(testVirtualDesktopGrid
+    Qt::Core
+    Qt::Test
+)
+add_test(NAME kwin-testVirtualDesktopGrid COMMAND testVirtualDesktopGrid)
+ecm_mark_as_test(testVirtualDesktopGrid)
+
+########################################################
 # Test ClientMachine
 ########################################################
 set(testClientMachine_SRCS
