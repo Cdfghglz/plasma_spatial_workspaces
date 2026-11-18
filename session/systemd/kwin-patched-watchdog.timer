@@ -1,0 +1,10 @@
+[Unit]
+Description=Check every 30s that patched kwin is running
+
+[Timer]
+OnBootSec=10s
+OnUnitActiveSec=30s
+AccuracySec=5s
+
+[Install]
+WantedBy=default.target

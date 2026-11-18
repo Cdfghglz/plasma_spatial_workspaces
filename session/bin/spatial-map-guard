@@ -1,0 +1,330 @@
+#!/bin/bash
+# spatial-map-guard — snapshot and restore the KWin/Plasma desktop layout config
+#
+# Usage:
+#   spatial-map-guard backup [--force]   snapshot live config if healthy and changed
+#   spatial-map-guard restore [--restart] restore broken files from newest healthy snapshot
+#                                        (--restart: then hard-restart the patched kwin)
+#   spatial-map-guard check              print health of live config (exit 1 if broken)
+#   spatial-map-guard list               list snapshots
+#
+# Why this exists (2026-09-17): on a 100%-full disk Qt 5.15's QSaveFile (used by
+# KConfig and by kwin's spatial map writer) reports success but leaves a 0-byte
+# file. kwin then restarted with defaults (1 desktop) and saved that over the
+# real layout. The previous guard also truncated its only backup copy with `cp`.
+#
+# Safety rules:
+#   - never writes anything when / has < MIN_FREE_MB free
+#   - never snapshots a broken state (empty/unparseable files, 1 desktop, spatial
+#     mode off, activity maps with no desktops, desktop count lower than the
+#     newest snapshot) unless --force
+#   - snapshots are written to a temp dir, verified, then renamed (atomic)
+#   - identical state is not re-snapshotted, so the 30s timer normally writes nothing
+#   - snapshots live on a different filesystem (/media/20.04) when available
+
+set -u
+
+CONFIG_DIR="${SMG_CONFIG_DIR:-$HOME/.config}"
+PRIMARY_ROOT="${SMG_PRIMARY_ROOT:-/media/20.04/home/cdf/.kde-config-snapshots}"
+FALLBACK_ROOT="${SMG_FALLBACK_ROOT:-$HOME/.local/kwin-dev/config-snapshots}"
+KEEP=50
+MIN_FREE_MB="${SMG_MIN_FREE_MB:-1024}"
+STATE_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/spatial-map-guard"
+PATCHED="$HOME/.local/kwin-dev/bin/kwin_x11"
+LIB_PATH="$HOME/.local/kwin-dev/lib/x86_64-linux-gnu"
+
+# Plain config files covered besides kwinrc and the spatial-desktop-nav*.json maps.
+EXTRA_FILES=(kactivitymanagerdrc kglobalshortcutsrc khotkeysrc kwinrulesrc
+             plasmashellrc plasma-org.kde.plasma.desktop-appletsrc)
+
+log() { echo "spatial-map-guard: $*"; }
+
+notify() {
+    # Rate-limited desktop notification (once per 30 min per message key).
+    local key="$1" msg="$2" stamp
+    mkdir -p "$STATE_DIR"
+    stamp="$STATE_DIR/notified-$key"
+    if [ -f "$stamp" ] && [ $(( $(date +%s) - $(stat -c %Y "$stamp") )) -lt 1800 ]; then
+        return
+    fi
+    touch "$stamp"
+    DISPLAY=:0 gdbus call --session --dest org.freedesktop.Notifications \
+        --object-path /org/freedesktop/Notifications \
+        --method org.freedesktop.Notifications.Notify \
+        "spatial-map-guard" 0 "dialog-warning" "KWin layout guard" "$msg" \
+        "[]" "{'urgency': <byte 2>}" 0 >/dev/null 2>&1 || true
+}
+
+snap_root() {
+    if { [ -n "${SMG_PRIMARY_ROOT:-}" ] || mountpoint -q /media/20.04 2>/dev/null; } && mkdir -p "$PRIMARY_ROOT" 2>/dev/null \
+        && [ -w "$PRIMARY_ROOT" ]; then
+        echo "$PRIMARY_ROOT"
+    else
+        mkdir -p "$FALLBACK_ROOT"
+        echo "$FALLBACK_ROOT"
+    fi
+}
+
+free_mb() { df -Pm "$1" 2>/dev/null | awk 'NR==2 {print $4}'; }
+
+disk_ok() {
+    local f
+    f=$(free_mb "$CONFIG_DIR")
+    [ -n "$f" ] && [ "$f" -ge "$MIN_FREE_MB" ]
+}
+
+live_files() {
+    local f
+    echo kwinrc
+    for f in "${EXTRA_FILES[@]}"; do
+        [ -e "$CONFIG_DIR/$f" ] && echo "$f"
+    done
+    (cd "$CONFIG_DIR" && ls spatial-desktop-nav*.json 2>/dev/null)
+}
+
+newest_snapshot() {
+    # Newest snapshot dir (names are sortable timestamps); optional arg = skip unhealthy
+    local root d
+    root=$(snap_root)
+    for d in $(ls -1d "$root"/20* 2>/dev/null | sort -r); do
+        if [ "${1:-}" = healthy ]; then
+            health "$d" >/dev/null 2>&1 || continue
+        fi
+        echo "$d"
+        return 0
+    done
+    return 1
+}
+
+# health DIR [REFERENCE_DIR]
+# Prints one "BAD <file>: reason" line per problem; exit 0 if healthy.
+health() {
+    python3 - "$1" "${2:-}" <<'EOF'
+import configparser, glob, json, os, re, sys
+
+d, ref = sys.argv[1], sys.argv[2]
+bad = []
+
+def desktops(path):
+    try:
+        txt = open(path, encoding='utf-8', errors='replace').read()
+    except OSError:
+        return None, None
+    m = re.search(r'^\[Desktops\]\n(.*?)(?=^\[|\Z)', txt, re.M | re.S)
+    if not m:
+        return None, None
+    num = re.search(r'^Number=(\d+)', m.group(1), re.M)
+    spatial = re.search(r'^SpatialMode=(\w+)', m.group(1), re.M)
+    return (int(num.group(1)) if num else None), (spatial.group(1) if spatial else None)
+
+for path in sorted(glob.glob(os.path.join(d, '*'))):
+    name = os.path.basename(path)
+    if name in ('MANIFEST',) or name.startswith('.'):
+        continue
+    size = os.path.getsize(path)
+    if size == 0:
+        bad.append(f'{name}: empty file')
+        continue
+    head = open(path, 'rb').read(64)
+    if b'\0' in head:
+        bad.append(f'{name}: contains NUL bytes')
+        continue
+    if name.endswith('.json'):
+        try:
+            obj = json.load(open(path))
+        except ValueError as e:
+            bad.append(f'{name}: unparseable JSON ({e})')
+            continue
+        desks = [k for k, v in obj.items() if isinstance(v, dict) and 'above' in v]
+        # The legacy global map may legitimately be anything; per-activity maps must have desktops.
+        if name != 'spatial-desktop-nav.json' and not desks:
+            bad.append(f'{name}: no desktops in map')
+    elif not re.search(rb'^\[', open(path, 'rb').read(), re.M):
+        bad.append(f'{name}: no [groups]')
+
+kw = os.path.join(d, 'kwinrc')
+if not os.path.exists(kw):
+    bad.append('kwinrc: missing')
+else:
+    num, spatial = desktops(kw)
+    if num is None or num < 2:
+        bad.append(f'kwinrc: Desktops/Number={num} (defaults?)')
+    if spatial != 'true':
+        bad.append(f'kwinrc: SpatialMode={spatial}')
+    if ref:
+        rnum, _ = desktops(os.path.join(ref, 'kwinrc'))
+        if num is not None and rnum is not None and num < rnum:
+            bad.append(f'kwinrc: Number dropped {rnum} -> {num} vs newest snapshot')
+
+for b in bad:
+    print('BAD', b)
+sys.exit(1 if bad else 0)
+EOF
+}
+
+state_hash() {
+    # Hash of all live covered files (name + content)
+    local f
+    for f in $(live_files); do
+        printf '%s\n' "$f"
+        cat "$CONFIG_DIR/$f" 2>/dev/null
+    done | sha256sum | cut -c1-16
+}
+
+backup() {
+    local force="${1:-}" root ref cur tmp snap f problems
+    if ! disk_ok; then
+        log "skipped backup: less than ${MIN_FREE_MB} MB free on $CONFIG_DIR"
+        notify lowdisk "Disk almost full: KWin layout snapshots paused and configs at risk of being wiped. Free space now."
+        return 0
+    fi
+    root=$(snap_root)
+    ref=$(newest_snapshot || true)
+    cur=$(state_hash)
+    if [ -n "$ref" ] && [ "$(cat "$ref/.hash" 2>/dev/null)" = "$cur" ]; then
+        return 0   # unchanged: write nothing
+    fi
+
+    # Stage live files in tmpfs first, so health is judged on one consistent copy.
+    local stage
+    stage=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/smg-stage.XXXXXX") || return 1
+    for f in $(live_files); do
+        cp -p "$CONFIG_DIR/$f" "$stage/$f" || { rm -rf "$stage"; log "copy of $f failed"; return 1; }
+    done
+    problems=$(health "$stage" "$ref")
+    if [ -n "$problems" ] && [ "$force" != "--force" ]; then
+        rm -rf "$stage"
+        log "refusing to snapshot unhealthy config (newest good: ${ref:-none}):"
+        echo "$problems" | sed 's/^/  /'
+        notify unhealthy "KWin desktop config looks broken (${problems%%$'\n'*}). Not backing it up. Fix: spatial-map-guard restore --restart"
+        return 0
+    fi
+
+    [ "$(free_mb "$root")" -ge 50 ] || { rm -rf "$stage"; log "snapshot target $root nearly full"; return 1; }
+    tmp="$root/.tmp-$$"
+    snap="$root/$(date +%Y%m%d-%H%M%S)"
+    rm -rf "$tmp"
+    mkdir -p "$tmp" &&
+        cp -p "$stage"/* "$tmp"/ &&
+        (cd "$stage" && sha256sum -- *) > "$tmp/MANIFEST" &&
+        (cd "$tmp" && sha256sum --quiet -c MANIFEST) &&
+        echo "$cur" > "$tmp/.hash" &&
+        sync -f "$tmp" &&
+        mv "$tmp" "$snap"
+    local rc=$?
+    rm -rf "$stage"
+    if [ $rc -ne 0 ]; then
+        rm -rf "$tmp"
+        log "snapshot failed; previous snapshots untouched"
+        return 1
+    fi
+    log "snapshot $snap${problems:+ (forced despite problems)}"
+
+    rotate "$root"
+}
+
+rotate() {
+    # Keep the newest $KEEP, plus the newest snapshot of each hour for 2 days and of
+    # each day for 60 days, so a noisy config (plasma screen/panel churn) can't push
+    # out older known-good states.
+    ls -1d "$1"/20* 2>/dev/null | python3 -c '
+import datetime, os, sys
+keep_n = int(sys.argv[1])
+now = datetime.datetime.now()
+seen = set()
+for i, path in enumerate(sorted((l.strip() for l in sys.stdin), reverse=True)):
+    try:
+        t = datetime.datetime.strptime(os.path.basename(path), "%Y%m%d-%H%M%S")
+    except ValueError:
+        continue
+    age = now - t
+    buckets = []
+    if age <= datetime.timedelta(days=2):
+        buckets.append(t.strftime("h%Y%m%d%H"))
+    if age <= datetime.timedelta(days=60):
+        buckets.append(t.strftime("d%Y%m%d"))
+    new = [b for b in buckets if b not in seen]
+    seen.update(buckets)
+    if i < keep_n or new:
+        continue
+    print(path)
+' "$KEEP" | xargs -r rm -rf
+}
+
+restore() {
+    local restart="${1:-}" snap problems f n=0
+    # Build a view of just the covered live files to check them in place.
+    local view
+    view=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/smg-view.XXXXXX") || return 1
+    for f in $(live_files); do ln -s "$CONFIG_DIR/$f" "$view/$f"; done
+    snap=$(newest_snapshot healthy || true)
+    problems=$(health "$view" "$snap")
+    rm -rf "$view"
+    if [ -z "$problems" ]; then
+        log "live config healthy, nothing to restore"
+        return 0
+    fi
+    log "live config problems:"
+    echo "$problems" | sed 's/^/  /'
+    if ! echo "$problems" | grep -qv 'Number dropped'; then
+        # Only a lower desktop count: could be deliberate, so don't undo it silently.
+        log "only the desktop count dropped; not restoring (use 'backup --force' to accept it)"
+        notify dropped "KWin desktop count dropped vs last snapshot. If intended: spatial-map-guard backup --force"
+        return 0
+    fi
+    if [ -z "$snap" ]; then
+        log "no healthy snapshot to restore from"
+        return 1
+    fi
+    if ! disk_ok; then
+        log "not restoring: disk full (a restore now would itself be wiped)"
+        notify lowdisk "Disk almost full: cannot safely restore KWin layout. Free space first."
+        return 1
+    fi
+    # Restore every file flagged, plus kwinrc and all maps together whenever any of
+    # them is flagged (they reference each other's desktop IDs).
+    local want=""
+    if echo "$problems" | grep -qE 'BAD (kwinrc|spatial-desktop-nav)'; then
+        want=$(cd "$snap" && ls kwinrc spatial-desktop-nav*.json 2>/dev/null)
+    fi
+    want="$want"$'\n'$(echo "$problems" | sed -n 's/^BAD \([^:]*\):.*/\1/p')
+    for f in $(echo "$want" | sort -u); do
+        [ -f "$snap/$f" ] || continue
+        cp -p "$snap/$f" "$CONFIG_DIR/.$f.smg-restore" &&
+            mv -f "$CONFIG_DIR/.$f.smg-restore" "$CONFIG_DIR/$f" &&
+            { log "restored $f from $(basename "$snap")"; n=$((n + 1)); }
+    done
+    log "restored $n file(s) from $snap"
+
+    if [ "$restart" = "--restart" ] && [ $n -gt 0 ]; then
+        # SIGKILL so the running kwin cannot save its broken in-memory state over the restore.
+        local pid
+        pid=$(pgrep -x kwin_x11)
+        [ -n "$pid" ] && kill -9 $pid
+        (cd "$HOME/.local/kwin-dev/crashes" 2>/dev/null || cd
+         setsid env LD_LIBRARY_PATH="$LIB_PATH" QT_PLUGIN_PATH="$LIB_PATH/plugins" \
+            XDG_DATA_DIRS="$HOME/.local/kwin-dev/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" \
+            DISPLAY=:0 "$PATCHED" --replace </dev/null >/dev/null 2>&1 &)
+        log "restarted patched kwin"
+    fi
+}
+
+check() {
+    local view problems snap f
+    view=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/smg-view.XXXXXX") || return 2
+    for f in $(live_files); do ln -s "$CONFIG_DIR/$f" "$view/$f"; done
+    snap=$(newest_snapshot healthy || true)
+    problems=$(health "$view" "$snap")
+    rm -rf "$view"
+    echo "free on /: $(free_mb "$CONFIG_DIR") MB; newest healthy snapshot: ${snap:-none}"
+    if [ -n "$problems" ]; then echo "$problems"; return 1; fi
+    echo OK
+}
+
+case "${1:-}" in
+    backup)  backup "${2:-}" ;;
+    restore) restore "${2:-}" ;;
+    check)   check ;;
+    list)    ls -1d "$(snap_root)"/20* 2>/dev/null ;;
+    *)       echo "Usage: spatial-map-guard {backup [--force]|restore [--restart]|check|list}" >&2; exit 1 ;;
+esac

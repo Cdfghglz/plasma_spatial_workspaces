@@ -1,0 +1,31 @@
+[Unit]
+Description=Watchdog: replace system kwin with patched kwin-dev
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+Environment=DISPLAY=:0
+Environment=QT_PLUGIN_PATH=/home/cdf/.local/kwin-dev/lib/x86_64-linux-gnu/plugins
+LimitCORE=infinity
+ExecStart=/bin/bash -c '\
+  GUARD=$HOME/.local/kwin-dev/bin/spatial-map-guard; \
+  PATCHED=$HOME/.local/kwin-dev/bin/kwin_x11; \
+  CRASH_DIR=$HOME/.local/kwin-dev/crashes; \
+  [ -x "$PATCHED" ] || exit 0; \
+  PID=$(pgrep -x kwin_x11 2>/dev/null); \
+  if [ -z "$PID" ]; then \
+    [ -x "$GUARD" ] && "$GUARD" restore; \
+    cd "$CRASH_DIR" && ulimit -c unlimited && exec "$PATCHED" --replace; \
+  fi; \
+  EXE=$(readlink -f /proc/$PID/exe 2>/dev/null); \
+  if [ "$EXE" != "$PATCHED" ]; then \
+    [ -x "$GUARD" ] && "$GUARD" backup; \
+    [ -x "$GUARD" ] && "$GUARD" restore; \
+    cd "$CRASH_DIR" && ulimit -c unlimited && exec "$PATCHED" --replace; \
+  else \
+    [ -x "$GUARD" ] && "$GUARD" backup; \
+  fi'
+Restart=no
+
+[Install]
+WantedBy=graphical-session.target

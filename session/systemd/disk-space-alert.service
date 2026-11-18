@@ -1,0 +1,8 @@
+[Unit]
+Description=Warn before the root disk fills up (a full disk wipes KDE configs)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/disk-space-alert.sh
+Nice=10
+IOSchedulingClass=idle

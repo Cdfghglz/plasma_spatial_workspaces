@@ -1,0 +1,16 @@
+#!/bin/bash
+# Start the patched kwin-dev build (--replace) in its own transient systemd user
+# unit, so it is never a child of the script/service that launched it:
+# restarting that service would otherwise kill the window manager with it.
+# KillMode=process: a KWin crash auto-restart (KCrash) must outlive its unit.
+# QV4_FORCE_INTERPRETER=1 (2026-10-28): run KWin scripts without the Qt 5.15 JS JIT.
+# All runtime crashes since 10-19 were SIGSEGV in JIT code calling Array.indexOf ->
+# RuntimeHelpers::strictEqual on a corrupt array element (tiling script). KCrash
+# restarts inherit this env, so it covers them too.
+L=$HOME/.local/kwin-dev/lib/x86_64-linux-gnu
+exec systemd-run --user --collect --unit="kwin-dev-$(date +%s%N)" \
+    -p LimitCORE=infinity -p KillMode=process -p WorkingDirectory="$HOME/.local/kwin-dev/crashes" \
+    -E DISPLAY="${DISPLAY:-:0}" -E LD_LIBRARY_PATH="$L" -E QT_PLUGIN_PATH="$L/plugins" \
+    -E XDG_DATA_DIRS="$HOME/.local/kwin-dev/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" \
+    -E QV4_FORCE_INTERPRETER=1 \
+    "$HOME/.local/kwin-dev/bin/kwin_x11" --replace

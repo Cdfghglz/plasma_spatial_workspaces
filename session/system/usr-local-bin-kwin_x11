@@ -1,0 +1,13 @@
+#!/bin/bash
+# Wrapper: prefer patched kwin-dev with correct QT_PLUGIN_PATH.
+# Fallback to system binary if patched is missing.
+PATCHED="$HOME/.local/kwin-dev/bin/kwin_x11"
+if [ -x "$PATCHED" ]; then
+    export QT_PLUGIN_PATH="$HOME/.local/kwin-dev/lib/x86_64-linux-gnu/plugins${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}"
+    # Same as ~/.local/bin/kwin-dev-start: run KWin scripts without the Qt 5.15
+    # JS JIT (SIGSEGVs in JIT code calling Array.indexOf, 2026-10). Covers the
+    # kwin the Plasma session starts at login.
+    export QV4_FORCE_INTERPRETER=1
+    exec "$PATCHED" "$@"
+fi
+exec /usr/bin/kwin_x11 "$@"
