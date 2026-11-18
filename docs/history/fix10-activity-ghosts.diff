@@ -1,0 +1,108 @@
+--- /home/cdf/ws/kwin_fixes/backup-2026-10-19-activity-ghosts/tilingmanager.js	2026-03-28 04:53:01.410811555 +0100
++++ /home/cdf/.local/share/kwin/scripts/kwin-script-tiling/contents/code/tilingmanager.js	2026-10-19 12:11:11.270748737 +0200
+@@ -953,27 +953,73 @@
+     };
+ 
+ TilingManager.prototype._onTileActivitiesChanged = function(tile) {
+-    if (tile.onAllActivities()) {
+-        var activities = Object.keys(this.layouts);
+-    } else {
+-        var activities = tile.getActivities();
++    try {
++        if (tile.onAllActivities()) {
++            var activities = Object.keys(this.layouts);
++        } else {
++            var activities = tile.getActivities();
++        }
++        var tileScreen = tile.getScreen();
++        var tileDesktop = tile.getDesktop();
++        var newLayouts = this._getActivityLayouts(activities, tileDesktop, tileScreen);
++        // Fix 10 (2026-10-19): look for the tile in EVERY layout (all activities,
++        // desktops and screens), not just at its current desktop/screen. After a
++        // resume restart the tile's desktop/screen can be stale, and the copy in the
++        // previous activity's layout was never found -> permanent hole ("ghost") in
++        // that activity's tiling. _changeTileLayouts' own fallback didn't run because
++        // the new layout counted as "found".
++        var oldLayouts = this._getActivityLayouts(Object.keys(this.layouts), -1, null)
++            .filter(function(layout) {
++                return layout && layout.tiles.indexOf(tile) > -1;
++            });
++        this._changeTileLayouts(tile, oldLayouts, newLayouts);
++        this._getLayouts(this._currentDesktop, this._currentScreen)[0].activate();
++    } catch(err) {
++        print(err, "in TilingManager._onTileActivitiesChanged");
+     }
+-    var tileScreen = tile.getScreen();
+-    var tileDesktop = tile.getDesktop();
+-    var newLayouts = this._getActivityLayouts(activities, tileDesktop, tileScreen);
+-    var oldLayouts = new Array();
+-    for (var activityId in this.layouts) {
+-        var layouts = this._getActivityLayouts([activityId], tileDesktop, tileScreen);
++};
++
++/**
++ * Fix 10 (2026-10-19): remove tiles from an activity's layouts whose window is not
++ * on that activity according to KWin's live client.activities (empty = all
++ * activities, kept). Also resyncs the tile's cached activity list. Catches ghosts
++ * from any path, including windows tiled at startup before KWin knew their
++ * activities and activity changes for which no signal reached the tile.
++ */
++TilingManager.prototype._pruneForeignTiles = function(activityId, desktop) {
++    try {
++        var layouts = this._getActivityLayouts([activityId], desktop == null ? -1 : desktop, null);
++        var pruned = 0;
+         for (var i = 0; i < layouts.length; i++) {
+-            if (layouts[i].tiles.includes(tile)) {
+-                oldLayouts.push(layouts[i]);
++            var layout = layouts[i];
++            if (!layout) {
++                continue;
++            }
++            var foreign = layout.tiles.filter(function(tile) {
++                var client = tile.clients[0];
++                if (client == null) {
++                    return false;
++                }
++                var live = Array.from(client.activities);
++                return live.length > 0 && live.indexOf(activityId) < 0;
++            });
++            for (var j = 0; j < foreign.length; j++) {
++                var client = foreign[j].clients[0];
++                print("TILING: pruning ghost tile", client.resourceClass.toString(),
++                      '"' + client.caption + '"', "from activity", activityId,
++                      "desktop", layout.desktop, "screen", layout.screen);
++                foreign[j]._activities = Array.from(client.activities);
++                layout.removeTile(foreign[j]);
++                pruned++;
+             }
+         }
+-    };
+-    this._changeTileLayouts(tile, oldLayouts, newLayouts);
+-    this._getLayouts(this._currentDesktop, this._currentScreen)[0].activate();
++        return pruned;
++    } catch(err) {
++        print(err, "in TilingManager._pruneForeignTiles");
++        return 0;
++    }
+ };
+-  
++
+ TilingManager.prototype._onTileMovingStarted = function(tile) {
+     // NOTE: This supports only one moving window, breaks with multitouch input
+     this._moving = true;
+@@ -1088,6 +1134,7 @@
+         }
+     });
+     this._currentDesktop = _ws.currentDesktop;
++    this._pruneForeignTiles(this._currentActivity, this._currentDesktop);
+     var layouts = this._getLayouts(this._currentDesktop, null);
+     layouts.forEach(function(layout) {
+         if (! layout.active) {
+@@ -1340,6 +1387,7 @@
+         this._addActivity(id);
+     }
+     this._currentActivity = id;
++    this._pruneForeignTiles(id, null);
+ 
+     var layouts = this._getLayouts(-1, null);
+     layouts.forEach(function(layout) {

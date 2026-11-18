@@ -1,0 +1,102 @@
+--- /home/cdf/ws/kwin_fixes/kwin-src-backup-2026-11-18/virtualdesktops.cpp	2026-09-17 13:15:01.209471450 +0200
++++ kwin/src/virtualdesktops.cpp	2026-11-18 09:02:57.191701458 +0100
+@@ -772,6 +772,11 @@
+     return (it != m_spatialMaps.constEnd()) ? it.value() : empty;
+ }
+ 
++// Last current desktop per activity (activity id -> desktop id). File-local rather
++// than a class member so VirtualDesktopManager's layout (and every plugin built
++// against it) stays unchanged.
++static QHash<QString, QString> s_lastDesktopPerActivity;
++
+ void VirtualDesktopManager::initActivities()
+ {
+     if (Activities *activities = Activities::self()) {
+@@ -782,6 +787,10 @@
+         connect(activities, &Activities::currentChanged, this,
+                 [this, firstTime = true, prevActivityId = QString()](const QString &newActivityId) mutable {
+                     if (m_spatialMode) {
++                        const QString outgoingActivityId = prevActivityId;
++                        if (!outgoingActivityId.isEmpty() && m_current) {
++                            s_lastDesktopPerActivity[outgoingActivityId] = m_current->id();
++                        }
+                         // --- Per-activity desktop name handling ---
+                         // Save outgoing activity's current desktop names.
+                         if (!prevActivityId.isEmpty()) {
+@@ -842,6 +851,12 @@
+                         // (causes plasmashell containment churn and memory leak).
+                         m_grid.updateFromSpatialMap(activeSpatialMap(), m_desktops);
+                         m_rows = qMax(1, m_grid.height());
++                        // The current desktop may not exist in the new activity's
++                        // map (e.g. leaving PB's desktop 21 for KOM). Staying there
++                        // leaves the user on a desktop outside the grid: no spatial
++                        // neighbours, nothing highlighted, no windows. Go to the
++                        // desktop last used in that activity, else its first one.
++                        ensureCurrentInActivityMap(newActivityId);
+                         // Coalesce signals into a single event-loop tick so
+                         // plasmashell processes one structural change, not three.
+                         QTimer::singleShot(0, this, [this]() {
+@@ -855,6 +870,53 @@
+     }
+ }
+ 
++void VirtualDesktopManager::ensureCurrentInActivityMap(const QString &activityId)
++{
++    const VirtualDesktopSpatialMap &map = activeSpatialMap();
++    if (map.isEmpty() || !m_current || map.containsDesktop(m_current->id())) {
++        return;
++    }
++    VirtualDesktop *target = nullptr;
++    auto last = s_lastDesktopPerActivity.constFind(activityId);
++    if (last != s_lastDesktopPerActivity.constEnd()) {
++        VirtualDesktop *vd = desktopForId(last.value());
++        if (vd && map.containsDesktop(vd->id())) {
++            target = vd;
++        }
++    }
++    if (!target) {
++        for (VirtualDesktop *vd : qAsConst(m_desktops)) {
++            if (map.containsDesktop(vd->id())) {
++                target = vd;
++                break;
++            }
++        }
++    }
++    if (!target) {
++        return;
++    }
++    // Deferred: let the activity switch finish (window visibility, scripts)
++    // before changing desktop. Skip if the user switched again meanwhile.
++    const QString targetId = target->id();
++    QTimer::singleShot(0, this, [this, activityId, targetId]() {
++        if (currentActivityId() != activityId) {
++            return;
++        }
++        // Someone else (e.g. ActivityJumper's setCurrentDesktop right after its
++        // SetCurrentActivity) may already have picked a valid desktop: then
++        // leave it alone, only rescue the user if still outside the map.
++        if (m_current && activeSpatialMap().containsDesktop(m_current->id())) {
++            return;
++        }
++        VirtualDesktop *vd = desktopForId(targetId);
++        if (vd && vd != m_current && activeSpatialMap().containsDesktop(targetId)) {
++            qDebug() << "Activity switch: desktop" << (m_current ? m_current->x11DesktopNumber() : 0)
++                               << "not in activity map, moving to" << vd->x11DesktopNumber();
++            setCurrent(vd);
++        }
++    });
++}
++
+ void VirtualDesktopManager::slotActivityRemoved(const QString &activityId)
+ {
+     m_spatialMaps.remove(activityId);
+--- /home/cdf/ws/kwin_fixes/kwin-src-backup-2026-11-18/virtualdesktops.h	2026-07-08 09:27:20.484221529 +0200
++++ kwin/src/virtualdesktops.h	2026-11-18 08:40:55.907000919 +0100
+@@ -387,6 +387,7 @@
+      * unless no other activity references it.
+      */
+     bool isActivityAwareSpatialMode() const;
++    void ensureCurrentInActivityMap(const QString &activityId);
+ 
+     /**
+      * @returns true if @p desktopId appears in any per-activity spatial map.

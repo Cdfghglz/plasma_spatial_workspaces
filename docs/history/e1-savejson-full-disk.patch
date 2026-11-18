@@ -1,0 +1,35 @@
+Spatial map save: don't replace the map with a 0-byte file on a full disk
+
+Qt 5.15's QSaveFile only records errors from write(), not from the buffered
+flush inside commit(). On a full disk a small file therefore "commits"
+successfully as 0 bytes and replaces the real map (2026-09-17 incident: all
+per-activity spatial-desktop-nav-*.json maps wiped). Flush and verify
+explicitly, and cancel the write so the previous file survives.
+
+Applied and deployed in ~/ws/kwin-dev/kwin/src/virtualdesktops.cpp on
+2026-09-17; still needs porting into the rig (mayor/rig/src/virtualdesktops.cpp).
+Verified the flush()/cancelWriting() behaviour with a Qt 5.15.3 test program on
+a full tmpfs: old file kept, whereas plain write()+commit() left 0 bytes.
+
+--- a/src/virtualdesktops.cpp
++++ b/src/virtualdesktops.cpp
+@@ void VirtualDesktopSpatialMap::saveJson(const QString &filePath, const QStringList &knownIds,
+     QSaveFile file(filePath);
+     if (!file.open(QIODevice::WriteOnly)) {
+         qWarning() << "VirtualDesktopSpatialMap: cannot open" << filePath << "for writing";
+         return;
+     }
+-    file.write(QJsonDocument(root).toJson());
++    // Qt 5.15's QSaveFile only records errors from write(), not from the buffered
++    // flush inside commit(): on a full disk a small file "commits" as 0 bytes and
++    // replaces the real map. Flush and verify explicitly so the old file survives.
++    const QByteArray data = QJsonDocument(root).toJson();
++    if (file.write(data) != data.size() || !file.flush() || file.size() != data.size()) {
++        qWarning() << "VirtualDesktopSpatialMap: write failed for" << filePath << "-"
++                   << file.errorString() << "- keeping previous file";
++        file.cancelWriting();
++        return;
++    }
+     if (!file.commit()) {
+         qWarning() << "VirtualDesktopSpatialMap: failed to commit" << filePath;
+     }

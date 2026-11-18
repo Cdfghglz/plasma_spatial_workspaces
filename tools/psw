@@ -22,13 +22,13 @@
 
 set -euo pipefail
 
-BUILD_DIR="${HOME}/ws/kwin-dev/build"
+BUILD_DIR="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)/build/kwin"
 INSTALL_PREFIX="${HOME}/.local/kwin-dev"
 PLUGIN_PATH="${INSTALL_PREFIX}/lib/x86_64-linux-gnu/plugins"
 KWIN_BIN="${INSTALL_PREFIX}/bin/kwin_x11"
 RESTART_SCRIPT="${HOME}/scripts/restart_plasma_kwin.sh"
 
-# Root of the plasma_spatial_workspaces project (two levels up from dev/psw).
+# Root of the kde_gt umbrella repo (one level up from tools/psw).
 PSW_ROOT="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ info() { echo "  $*"; }
 cmd_build() {
     if [[ ! -d "${BUILD_DIR}" ]]; then
         echo "ERROR: Build dir not found: ${BUILD_DIR}" >&2
-        echo "       Run dev/setup-kwin-build.sh first." >&2
+        echo "       Configure it: cmake -S kwin -B build/kwin -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=~/.local/kwin-dev -DBUILD_TESTING=ON" >&2
         return 1
     fi
 
@@ -351,7 +351,7 @@ USAGE:
     psw test     Smoke test: trigger desktop grid, navigate, verify no crash
 
 PATHS:
-    Build dir:     ~/ws/kwin-dev/build
+    Build dir:     ~/ws/kde_gt/build/kwin
     Install dir:   ~/.local/kwin-dev
     Plugin path:   ~/.local/kwin-dev/lib/x86_64-linux-gnu/plugins
     Restart script: ~/scripts/restart_plasma_kwin.sh
