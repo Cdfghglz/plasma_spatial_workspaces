@@ -1,0 +1,8 @@
+[submodule "activityjumper"]
+	path = activityjumper
+	url = https://github.com/Cdfghglz/KActivityJumper.git
+	branch = fix-lock-release
+[submodule "kwin"]
+	path = kwin
+	url = https://github.com/Cdfghglz/kwin.git
+	branch = psw/spatial-mode
