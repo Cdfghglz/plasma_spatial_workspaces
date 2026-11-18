@@ -4,8 +4,10 @@ Everything that customises the Plasma 5.24 / X11 desktop on **xps** lives in thi
 a patched KWin (spatial per-activity desktop grid), KWin scripts, the pager plasmoid,
 KActivityJumper, and the session plumbing that keeps the patched KWin running.
 
-**Rule: this repo is the only copy.** Live locations are symlinks into it (`./deploy.sh`).
-Edit here, commit, push. `./deploy.sh --check` must report no drift.
+**Rule: this repo is the only source.** `./deploy.sh` installs it: plain files are symlinks into the
+repo; KDE packages (KWin scripts, pager plasmoid) are **copies**, because KPackage ignores symlinked
+package dirs (KWin then silently loads its built-in OSD and skips the rest). Edit here, re-run
+`./deploy.sh`, commit, push. `./deploy.sh --check` must report no drift.
 
 ## Map
 
@@ -93,6 +95,9 @@ make -C activityjumper/build ActivityJumper && pkill -x ActivityJumper        # 
   bindings); self-heal rebuilds them. Proper fix (Layout.* sizing) not done yet.
 - **i915 GPU hangs** in plasmashell (Mesa #11429); `INTEL_DEBUG=reemit` via `session/plasma-env`.
 - **Don't run `activityjumper/install`**: it does `sudo make install` over /usr.
+- **KDE packages must be real directories**, not symlinks (see Rule above).
+- **Desktop grid overlays** (rename pencil, ×, +) are interactive scenes on the first screen only; other
+  screens draw copies and clicks there are mapped onto the first-screen overlay (`mapToPrimaryOverlay`).
 - **`tobiifreed.service` start job hangs**, which keeps `default.target` from ever being reached; never
   order desktop units `After=default.target`.
 

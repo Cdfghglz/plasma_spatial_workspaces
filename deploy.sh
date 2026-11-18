@@ -1,7 +1,10 @@
 #!/bin/bash
-# deploy.sh — install the desktop customisation from this repo by SYMLINKING every
-# file/dir into the place the session reads it from. The repo is the only copy:
-# edit here, never in ~/.local/share/kwin/scripts & co.
+# deploy.sh — install the desktop customisation from this repo into the places the
+# session reads it from. Plain files are SYMLINKED; KDE packages (KWin scripts, the
+# pager plasmoid) are COPIED, because KPackage does not follow symlinked package
+# dirs (KWin then silently loads nothing / its built-in copy — found 2026-11-18).
+# The repo is the only source: edit here, never in ~/.local/share/kwin/scripts & co,
+# then re-run ./deploy.sh (copies) — ./deploy.sh --check shows any drift.
 #
 #   ./deploy.sh            link everything (backs up anything that is not already our link)
 #   ./deploy.sh --check    report drift only, change nothing (exit 1 if anything is off)
@@ -9,7 +12,7 @@
 # Does NOT build or restart anything:
 #   KWin C++        tools/psw build   (builds build/kwin, installs to ~/.local/kwin-dev)
 #   ActivityJumper  see README "ActivityJumper"
-#   KWin scripts    take effect on the next kwin restart (never unload/reload a live script)
+#   KWin scripts    copied; take effect on the next kwin restart (never unload/reload a live script)
 #   systemd units   systemctl --user daemon-reload
 set -u
 REPO="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
@@ -19,12 +22,12 @@ drift=0
 
 # repo-relative source  ->  absolute target
 MAP=(
-  "kwin-scripts/desktopchangeosd            $HOME/.local/share/kwin/scripts/desktopchangeosd"
-  "kwin-scripts/desktopchangeosd-spatial    $HOME/.local/share/kwin/scripts/desktopchangeosd-spatial"
-  "kwin-scripts/spatial-desktop-nav         $HOME/.local/share/kwin/scripts/spatial-desktop-nav"
-  "kwin-scripts/kwin-script-tiling          $HOME/.local/share/kwin/scripts/kwin-script-tiling"
-  "kwin-scripts/alwaysopenonfocusedscreen   $HOME/.local/share/kwin/scripts/alwaysopenonfocusedscreen"
-  "plasmoids/pager                          $HOME/.local/share/plasma/plasmoids/org.kde.plasma.pager"
+  "copy:kwin-scripts/desktopchangeosd            $HOME/.local/share/kwin/scripts/desktopchangeosd"
+  "copy:kwin-scripts/desktopchangeosd-spatial    $HOME/.local/share/kwin/scripts/desktopchangeosd-spatial"
+  "copy:kwin-scripts/spatial-desktop-nav         $HOME/.local/share/kwin/scripts/spatial-desktop-nav"
+  "copy:kwin-scripts/kwin-script-tiling          $HOME/.local/share/kwin/scripts/kwin-script-tiling"
+  "copy:kwin-scripts/alwaysopenonfocusedscreen   $HOME/.local/share/kwin/scripts/alwaysopenonfocusedscreen"
+  "copy:plasmoids/pager                          $HOME/.local/share/plasma/plasmoids/org.kde.plasma.pager"
   "session/bin/kwin-dev-start               $HOME/.local/bin/kwin-dev-start"
   "session/bin/kwin-resume-watcher.sh       $HOME/.local/bin/kwin-resume-watcher.sh"
   "session/bin/kwin-patched-watchdog.sh     $HOME/.local/bin/kwin-patched-watchdog.sh"
@@ -54,9 +57,30 @@ say() { printf '%-8s %s\n' "$1" "$2"; }
 
 for entry in "${MAP[@]}"; do
   read -r rel target <<<"$entry"
+  copy=0; case "$rel" in copy:*) copy=1; rel="${rel#copy:}";; esac
   src="$REPO/$rel"
   if [ ! -e "$src" ]; then
     say MISSING "$rel (not in repo / not built)"; drift=1; continue
+  fi
+  if [ $copy = 1 ]; then
+    if [ -d "$target" ] && [ ! -L "$target" ] && diff -rq "$src" "$target" >/dev/null 2>&1; then
+      [ "$MODE" = --check ] && say ok "$target (copy)"
+      continue
+    fi
+    drift=1
+    if [ "$MODE" = --check ]; then
+      if [ -L "$target" ]; then say DRIFT "$target (symlink; KPackage ignores it, must be a copy)"
+      elif [ -e "$target" ]; then say DRIFT "$target (copy DIFFERS from repo)"
+      else say DRIFT "$target (absent)"; fi
+      continue
+    fi
+    if [ -e "$target" ] || [ -L "$target" ]; then
+      if [ ! -L "$target" ]; then mkdir -p "$BACKUP$(dirname "$target")"; cp -a "$target" "$BACKUP$target"; fi
+      rm -rf "$target"
+    fi
+    mkdir -p "$(dirname "$target")"; cp -a "$src" "$target"
+    say copied "$target"
+    continue
   fi
   if [ -L "$target" ] && [ "$(readlink -f "$target")" = "$(readlink -f "$src")" ]; then
     [ "$MODE" = --check ] && say ok "$target"

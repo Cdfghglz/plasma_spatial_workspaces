@@ -3,7 +3,8 @@
 Read `README.md` first: component map, build/restart commands, log locations, known issues.
 
 Rules:
-1. This repo is the single source. Live files are symlinks into it (`./deploy.sh`). Never edit
+1. This repo is the single source, installed by `./deploy.sh` (symlinks for plain files, copies for KDE
+   packages: KWin scripts and the pager — KPackage ignores symlinked dirs). Never edit
    `~/.local/share/kwin/scripts`, `~/.local/bin`, `~/scripts` or `~/.config/systemd/user` copies
    directly; if `./deploy.sh --check` shows drift, bring the change into the repo first.
 2. Before touching anything live, take the user's state seriously: they are working in this session.
