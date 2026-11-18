@@ -16,27 +16,6 @@ var gridPositions = {};
 // (VirtualDesktopManager::m_activityNames). The JS layer no longer
 // needs to track or swap names on activity switch.
 
-// Direction codes expected by workspace.setSpatialNeighbor(from, direction, to).
-// Must match the switch in WorkspaceWrapper::setSpatialNeighbor (workspace_wrapper.cpp).
-var directionCode = { up: 0, down: 1, left: 2, right: 3 };
-var oppositeDirectionCode = { up: 1, down: 0, left: 3, right: 2 };
-var oppositeDirection = { up: "down", down: "up", left: "right", right: "left" };
-
-/**
- * Query the live C++ spatial neighbor (grid-derived, not the JS-side
- * spatialMap snapshot) for a desktop number in a direction.
- * Returns a desktop number, or 0 if there is no neighbor.
- */
-function liveSpatialNeighbor(desktopNum, direction) {
-    switch (direction) {
-        case "up":    return workspace.spatialNeighborUp(desktopNum);
-        case "down":  return workspace.spatialNeighborDown(desktopNum);
-        case "left":  return workspace.spatialNeighborLeft(desktopNum);
-        case "right": return workspace.spatialNeighborRight(desktopNum);
-        default:      return 0;
-    }
-}
-
 /**
  * Initialize the spatial map from existing desktops.
  * In spatial mode, reads neighbor relationships from KWin's VirtualDesktopManager
@@ -133,30 +112,16 @@ function onActivityChanged() {
 
 /**
  * Navigate in a direction. Returns true if navigation happened.
- *
- * Queries the live C++ grid-derived neighbor (workspace.spatialNeighbor*)
- * rather than the JS-side spatialMap snapshot, which is only rebuilt on
- * init()/activity switch and would not know about desktops that became
- * grid-adjacent to the current one without an explicit link to it (e.g. a
- * desktop created from a different neighbor).
  */
 function navigate(direction) {
-    if (!workspace.spatialMode) {
-        var current = currentDesktopName();
-        var mapping = spatialMap[current];
-        if (!mapping) return false;
+    var current = currentDesktopName();
+    var mapping = spatialMap[current];
+    if (!mapping) return false;
 
-        var targetName = mapping[direction];
-        if (!targetName) return false;
+    var targetName = mapping[direction];
+    if (!targetName) return false;
 
-        var targetNum = desktopNumberByName(targetName);
-        if (targetNum === 0) return false;
-
-        workspace.currentDesktop = targetNum;
-        return true;
-    }
-
-    var targetNum = liveSpatialNeighbor(workspace.currentDesktop, direction);
+    var targetNum = desktopNumberByName(targetName);
     if (targetNum === 0) return false;
 
     workspace.currentDesktop = targetNum;
@@ -169,23 +134,12 @@ function navigate(direction) {
  */
 function createInDirection(direction) {
     var current = currentDesktopName();
-    var currentNum = workspace.currentDesktop;
+    var mapping = spatialMap[current];
 
-    // If there's already a neighbor, just navigate to it. In spatial mode
-    // check the live grid (not just the JS snapshot) — the current desktop
-    // may already have a grid-adjacent neighbor placed via someone else's
-    // creation link, and creating another desktop there would overlap it.
-    if (workspace.spatialMode) {
-        if (liveSpatialNeighbor(currentNum, direction) !== 0) {
-            navigate(direction);
-            return null;
-        }
-    } else {
-        var mapping = spatialMap[current];
-        if (mapping && mapping[direction]) {
-            navigate(direction);
-            return null;
-        }
+    // If there's already a neighbor, just navigate to it
+    if (mapping && mapping[direction]) {
+        navigate(direction);
+        return null;
     }
 
     // Generate name for new desktop
@@ -207,27 +161,16 @@ function createInDirection(direction) {
     // C++ VirtualDesktopManager records the name via its nameChanged handler,
     // so no JS-side tracking is needed.
 
-    if (workspace.spatialMode) {
-        // Persist the positioning link to C++ so the new desktop is placed
-        // in the grid immediately. Without this, the new desktop only lives
-        // in this JS snapshot and above/toRight/below/toLeft (which read
-        // the C++ grid) can't reach it from any side, including its creator.
-        // Batch the two calls so save/rebuild/signals happen only once.
-        workspace.beginBatchSpatialUpdate();
-        workspace.setSpatialNeighbor(currentNum, directionCode[direction], newCount);
-        workspace.setSpatialNeighbor(newCount, oppositeDirectionCode[direction], currentNum);
-        workspace.endBatchSpatialUpdate();
-    }
-
     // Initialize spatial map entry for new desktop
     spatialMap[newName] = { up: null, down: null, left: null, right: null };
 
     // Wire bidirectional links
+    var opposite = { up: "down", down: "up", left: "right", right: "left" };
     if (!spatialMap[current]) {
         spatialMap[current] = { up: null, down: null, left: null, right: null };
     }
     spatialMap[current][direction] = newName;
-    spatialMap[newName][oppositeDirection[direction]] = current;
+    spatialMap[newName][opposite[direction]] = current;
 
     // Recompute positions for overview
     computePositions();
@@ -411,25 +354,17 @@ function renameDesktop(oldName, newName) {
 /**
  * Move the active window to the spatial neighbor in the given direction.
  * Optionally follow the window.
- *
- * Queries the live C++ grid-derived neighbor in spatial mode, for the same
- * reason navigate() does (see its comment).
  */
 function moveWindowToDirection(direction, follow) {
-    var targetNum;
-    if (!workspace.spatialMode) {
-        var current = currentDesktopName();
-        var mapping = spatialMap[current];
-        if (!mapping) return false;
+    var current = currentDesktopName();
+    var mapping = spatialMap[current];
+    if (!mapping) return false;
 
-        var targetName = mapping[direction];
-        if (!targetName) return false;
+    var targetName = mapping[direction];
+    if (!targetName) return false;
 
-        targetNum = desktopNumberByName(targetName);
-    } else {
-        targetNum = liveSpatialNeighbor(workspace.currentDesktop, direction);
-    }
-    if (!targetNum) return false;
+    var targetNum = desktopNumberByName(targetName);
+    if (targetNum === 0) return false;
 
     var client = workspace.activeClient;
     if (!client) return false;
