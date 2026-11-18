@@ -1,13 +1,16 @@
 [Unit]
 Description=Restart patched kwin on system resume (via logind DBus)
-After=default.target
+# No After=default.target: default.target can hang on another unit (tobiifreed,
+# 2026-11) and this watcher would then never start. It only needs the session bus.
 
 [Service]
 Type=simple
 Environment=DISPLAY=:0
 ExecStart=/home/cdf/.local/bin/kwin-resume-watcher.sh
-Restart=on-failure
+Restart=always
 RestartSec=10
+# always, not on-failure: when `gdbus monitor` exits cleanly (bus reconnect) the
+# watcher exits 0 and on-failure would leave it dead (found dead 2026-11-18).
 
 [Install]
 WantedBy=default.target
