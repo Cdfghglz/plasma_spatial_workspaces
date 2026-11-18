@@ -317,7 +317,21 @@ function TilingManager(timerResize, timerGeometryChanged) {
                                           if (tile != null) {
                                               var layout = self._getLayouts(tile.getDesktop(), tile.getScreen())[0];
                                               if (layout != null) {
-                                                  layout.swapTiles(tile, layout.tiles[0]);
+                                                  var n = layout.tiles.length;
+                                                  if (tile == layout.tiles[0] && n > 2) {
+                                                      // Already main: rotate the stack so the next
+                                                      // window becomes main (A,B,C -> B,C,A) and
+                                                      // keep focus on the main slot.
+                                                      for (var i = 0; i < n - 1; i++) {
+                                                          layout.swapTiles(layout.tiles[i], layout.tiles[i + 1]);
+                                                      }
+                                                      _ws.activeClient = layout.tiles[0].clients[0];
+                                                  } else if (tile == layout.tiles[0] && n == 2) {
+                                                      layout.swapTiles(layout.tiles[0], layout.tiles[1]);
+                                                      _ws.activeClient = layout.tiles[0].clients[0];
+                                                  } else {
+                                                      layout.swapTiles(tile, layout.tiles[0]);
+                                                  }
                                               }
                                           }
                                       }

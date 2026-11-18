@@ -78,7 +78,7 @@
 | Move Window Down                   | Meta+Shift+J      |
 | Toggle Tiling                      | Meta+Shift+f11    |
 | Tile now                           |                   |
-| Swap Window With Master            | Meta+Shift+M      |
+| Swap Window With Master (if already master: rotate stack) | Meta+Shift+M      |
 | Resize Active Window To The Left   | Meta+Alt+H        |
 | Resize Active Window To The Right  | Meta+Alt+L        |
 | Resize Active Window To The Top    | Meta+Alt+K        |
