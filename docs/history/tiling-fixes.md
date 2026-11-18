@@ -1,3 +1,7 @@
+> Moved from ~/ws/kwin_fixes (2026-11-18). Paths below that mention ~/ws/kwin_fixes or editing
+> ~/.local/share/kwin/scripts directly are historical: the code now lives in kwin-scripts/kwin-script-tiling
+> and is deployed as a symlink by deploy.sh.
+
 # kwin-script-tiling Local Fixes
 
 Applied 2026-03-20 to `~/.local/share/kwin/scripts/kwin-script-tiling/contents/code/`
