@@ -51,7 +51,7 @@ function TileList(timer) {
     this.focusHistory = {};
 
     try {
-        this.noBorder = KWin.readConfig("noBorder", false);
+        this.noBorder = _kwin.readConfig("noBorder", false);
     } catch(err) {
         print(err, "in TileList");
     }
@@ -64,10 +64,10 @@ function TileList(timer) {
     // clients are added in order to be able to keep track of the
     // new tiles
     var self = this;
-    workspace.clientAdded.connect(function(client) {
+    _ws.clientAdded.connect(function(client) {
         self.addClient(client);
         // NOTE: When a new client is added, activeChanged will be called before it even appears
-        // in workspace.clientList(), so we need to keep track of the focus change here as well.
+        // in _ws.clientList(), so we need to keep track of the focus change here as well.
         self.trackFocusChanges(client);
     });
 };
@@ -126,9 +126,14 @@ TileList.prototype.connectSignals = function(client) {
         if (!client.tiling_resize) {
             var tile = getTile(client);
             if (tile != null) {
-                self.timer.stop();
+                if (self.timer && typeof self.timer.stop === 'function') self.timer.stop();
                 self._scheduledUpdates.push({tile: tile, client: client});
-                self.timer.start();
+                if (self.timer && typeof self.timer.start === 'function') {
+                    self.timer.start();
+                } else {
+                    // Timer is invalid (e.g., after hibernate/wake), process immediately
+                    self.updateGeometry();
+                }
             }
         }
     });
@@ -416,7 +421,7 @@ TileList.prototype.toggleNoBorder = function() {
 TileList.prototype.trackFocusChanges = function(focusedClient) {
     try {
         if (!focusedClient) {
-            var clients = workspace.clientList();
+            var clients = _ws.clientList();
             for (var i = 0; i < clients.length; ++i) {
                 if (clients[i].active) {
                     focusedClient = clients[i];

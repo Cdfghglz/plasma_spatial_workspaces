@@ -38,6 +38,7 @@ Qt.include("ignored.js");
  * @class
  */
 function TilingManager(timerResize, timerGeometryChanged) {
+    // _ws is captured in signal.js at include time (var _ws = workspace;)
     /**
      * Default layout type which is selected for new layouts.
      */
@@ -64,11 +65,11 @@ function TilingManager(timerResize, timerGeometryChanged) {
     /**
      * Number of desktops in the system.
      */
-    this.desktopCount = workspace.desktops;
+    this.desktopCount = _ws.desktops;
     /**
      * Number of screens in the system.
      */
-    this.screenCount = workspace.numScreens;
+    this.screenCount = _ws.numScreens;
     /**
      * Dictionary containing an array for each known activity.
      * The arrays in turn contain a list of layouts for every desktop.
@@ -83,11 +84,11 @@ function TilingManager(timerResize, timerGeometryChanged) {
     /**
      * Current screen, needed to be able to track screen changes.
      */
-    this._currentScreen = workspace.activeScreen;
+    this._currentScreen = _ws.activeScreen;
     /**
      * Current desktop, needed to be able to track screen changes.
      */
-    this._currentDesktop = workspace.currentDesktop;
+    this._currentDesktop = _ws.currentDesktop;
     /**
      * True if a user moving operation is in progress.
      */
@@ -96,7 +97,7 @@ function TilingManager(timerResize, timerGeometryChanged) {
      * Whether tiling is active on all desktops
      * This is overridden by per-desktop settings
      */
-    this.userActive = KWin.readConfig("userActive", true);
+    this.userActive = _kwin.readConfig("userActive", true);
     /**
      * A signal to be emited on manual layout change
      */
@@ -114,7 +115,7 @@ function TilingManager(timerResize, timerGeometryChanged) {
     // Format: desktop:layoutname[,...]
     // Negative desktop number deactivates tiling
     this.layoutConfig = [];
-    var lC = String(KWin.readConfig("layouts", "")).replace(/ /g,"").split(",");
+    var lC = String(_kwin.readConfig("layouts", "")).replace(/ /g,"").split(",");
     for (var i = 0; i < lC.length; i++) {
         var layout = lC[i].split(":");
         try {
@@ -146,7 +147,7 @@ function TilingManager(timerResize, timerGeometryChanged) {
         this.layoutConfig.push(desktoplayout);
     }
 
-    this._currentActivity = workspace.currentActivity;
+    this._currentActivity = _ws.currentActivity;
     this._addActivity(this._currentActivity);
 
     var self = this;
@@ -163,7 +164,7 @@ function TilingManager(timerResize, timerGeometryChanged) {
         self._currentScreen = client.screen;
     });
 
-    var existingClients = workspace.clientList();
+    var existingClients = _ws.clientList();
     for (var i=0; i<existingClients.length; i++) {
         self.tiles.addClient(existingClients[i]);
     }
@@ -175,54 +176,54 @@ function TilingManager(timerResize, timerGeometryChanged) {
 
     // Activate the visible layouts
     // Do it after adding the existingClients to prevent unnecessary geometry changes
-    this._getLayouts(workspace.currentDesktop, null).forEach(function(layout) {
+    this._getLayouts(_ws.currentDesktop, null).forEach(function(layout) {
         layout.activate();
     });
 
     // Register global callbacks
-    workspace.numberDesktopsChanged.connect(function() {
+    _ws.numberDesktopsChanged.connect(function() {
         self._onNumberDesktopsChanged();
     });
-    workspace.numberScreensChanged.connect(function() {
+    _ws.numberScreensChanged.connect(function() {
         self._onNumberScreensChanged();
     });
 
-    workspace.screenResized.connect(function(screen) {
+    _ws.screenResized.connect(function(screen) {
         self._timerResize.screen = screen;
         self._timerResize.start();
     });
-    workspace.currentDesktopChanged.connect(function() {
+    _ws.currentDesktopChanged.connect(function() {
         self._onCurrentDesktopChanged();
     });
-    workspace.clientRemoved.connect(function(client) {
-        if (KWin.readConfig("removeEmptyDesktops", false) && !ignored.isIgnored(client) &&
-            self.desktopCount > KWin.readConfig("minDesktopsToKeep", 1))
+    _ws.clientRemoved.connect(function(client) {
+        if (_kwin.readConfig("removeEmptyDesktops", false) && !ignored.isIgnored(client) &&
+            self.desktopCount > _kwin.readConfig("minDesktopsToKeep", 1))
         {
             self._removeEmptyDesktops();
         }
     });
-    workspace.currentActivityChanged.connect(function(id) {
+    _ws.currentActivityChanged.connect(function(id) {
         self._onCurrentActivityChanged(id);
     });
-    workspace.activityRemoved.connect(function(id) {
+    _ws.activityRemoved.connect(function(id) {
         self._onActivityRemoved(id);
     });
     // Register keyboard shortcuts
     // KWin versions before 5.8.3 do not have this and will crash if we try to call it
     // So just check if the function is available
-    if (KWin.registerShortcut) {
-        KWin.registerShortcut("TILING: Next Tiling Layout",
+    if (_kwin.registerShortcut) {
+        _kwin.registerShortcut("TILING: Next Tiling Layout",
                               "TILING: Next Tiling Layout",
                               "Meta+Shift+PgDown",
                               function() {
                                   var currentLayout = self._getCurrentLayoutType();
                                   var nextIndex = (currentLayout.index + 1) % self.availableLayouts.length;
-                                  self._switchLayout(workspace.currentDesktop,
-                                                     workspace.activeScreen,
+                                  self._switchLayout(_ws.currentDesktop,
+                                                     _ws.activeScreen,
                                                      nextIndex);
                                   self._notifyLayoutChanged();
                               });
-        KWin.registerShortcut("TILING: Previous Tiling Layout",
+        _kwin.registerShortcut("TILING: Previous Tiling Layout",
                               "TILING: Previous Tiling Layout",
                               "Meta+Shift+PgUp",
                               function() {
@@ -231,16 +232,16 @@ function TilingManager(timerResize, timerGeometryChanged) {
                                   if (nextIndex < 0) {
                                       nextIndex += self.availableLayouts.length;
                                   }
-                                  self._switchLayout(workspace.currentDesktop,
-                                                     workspace.activeScreen,
+                                  self._switchLayout(_ws.currentDesktop,
+                                                     _ws.activeScreen,
                                                      nextIndex);
                                   self._notifyLayoutChanged();
                               });
-        KWin.registerShortcut("TILING: Toggle Floating",
+        _kwin.registerShortcut("TILING: Toggle Floating",
                               "TILING: Toggle Floating",
                               "Meta+F",
                               function() {
-                                  var client = workspace.activeClient;
+                                  var client = _ws.activeClient;
                                   if (client == null) {
                                       print("No active client");
                                       return;
@@ -256,61 +257,61 @@ function TilingManager(timerResize, timerGeometryChanged) {
                                       self.tiles.untileClient(client);
                                   }
                               });
-        KWin.registerShortcut("TILING: Toggle Border for all",
+        _kwin.registerShortcut("TILING: Toggle Border for all",
                               "TILING: Toggle Border for all",
                               "",
                               function() {
                                   self.tiles.toggleNoBorder();
                               });
-        KWin.registerShortcut("TILING: Move Window Left",
+        _kwin.registerShortcut("TILING: Move Window Left",
                               "TILING: Move Window Left",
                               "Meta+Shift+H",
                               function() {
                                   self._moveTile(Direction.Left);
                               });
-        KWin.registerShortcut("TILING: Move Window Right",
+        _kwin.registerShortcut("TILING: Move Window Right",
                               "TILING: Move Window Right",
                               "Meta+Shift+L",
                               function() {
                                   self._moveTile(Direction.Right);
                               });
-        KWin.registerShortcut("TILING: Move Window Up",
+        _kwin.registerShortcut("TILING: Move Window Up",
                               "TILING: Move Window Up",
                               "Meta+Shift+K",
                               function() {
                                   self._moveTile(Direction.Up);
                               });
-        KWin.registerShortcut("TILING: Move Window Down",
+        _kwin.registerShortcut("TILING: Move Window Down",
                               "TILING: Move Window Down",
                               "Meta+Shift+J",
                               function() {
                                   self._moveTile(Direction.Down);
                               });
-        KWin.registerShortcut("TILING: Toggle Tiling",
+        _kwin.registerShortcut("TILING: Toggle Tiling",
                               "TILING: Toggle Tiling",
                               "Meta+Shift+f11",
                               function() {
-                                  var currentScreen = workspace.activeScreen;
-                                  var currentDesktop = workspace.currentDesktop;
+                                  var currentScreen = _ws.activeScreen;
+                                  var currentDesktop = _ws.currentDesktop;
                                   self._getLayouts(currentDesktop, currentScreen)[0].toggleUserActive();
                                   self._notifyTilingChanged();
                               });
-        KWin.registerShortcut("TILING: Tile now",
+        _kwin.registerShortcut("TILING: Tile now",
                               "TILING: Tile now",
                               "",
                               function() {
-                                  var currentScreen = workspace.activeScreen;
-                                  var currentDesktop = workspace.currentDesktop;
+                                  var currentScreen = _ws.activeScreen;
+                                  var currentDesktop = _ws.currentDesktop;
                                   var layout = self._getLayouts(currentDesktop, currentScreen)[0];
                                   layout.toggleUserActive();
                                   layout.toggleUserActive();
                               });
-        KWin.registerShortcut("TILING: Swap Window With Master",
+        _kwin.registerShortcut("TILING: Swap Window With Master",
                               "TILING: Swap Window With Master",
                               "Meta+Shift+M",
                               function() {
                                   try {
-                                      var client = workspace.activeClient;
+                                      var client = _ws.activeClient;
                                       if (client != null) {
                                           var tile = self.tiles.getTile(client);
                                           if (tile != null) {
@@ -324,12 +325,12 @@ function TilingManager(timerResize, timerGeometryChanged) {
                                       print(err, "in swap-window-with-master");
                                   }
                               });
-        KWin.registerShortcut("TILING: Resize Active Window To The Left",
+        _kwin.registerShortcut("TILING: Resize Active Window To The Left",
                               "TILING: Resize Active Window To The Left",
                               "Meta+Alt+H",
                               function() {
                                   try {
-                                      var client = workspace.activeClient;
+                                      var client = _ws.activeClient;
                                       if (client == null) {
                                           return;
                                       }
@@ -352,12 +353,12 @@ function TilingManager(timerResize, timerGeometryChanged) {
                                       print(err, "in resize-window-to-the-left");
                                   }
                               });
-        KWin.registerShortcut("TILING: Resize Active Window To The Right",
+        _kwin.registerShortcut("TILING: Resize Active Window To The Right",
                               "TILING: Resize Active Window To The Right",
                               "Meta+Alt+L",
                               function() {
                                   try {
-                                      var client = workspace.activeClient;
+                                      var client = _ws.activeClient;
                                       if (client == null) {
                                           return;
                                       }
@@ -380,12 +381,12 @@ function TilingManager(timerResize, timerGeometryChanged) {
                                       print(err, "in resize-window-to-the-left");
                                   }
                               });
-        KWin.registerShortcut("TILING: Resize Active Window To The Top",
+        _kwin.registerShortcut("TILING: Resize Active Window To The Top",
                               "TILING: Resize Active Window To The Top",
                               "Meta+Alt+K",
                               function() {
                                   try {
-                                      var client = workspace.activeClient;
+                                      var client = _ws.activeClient;
                                       if (client == null) {
                                           return;
                                       }
@@ -408,12 +409,12 @@ function TilingManager(timerResize, timerGeometryChanged) {
                                       print(err, "in resize-window-to-the-left");
                                   }
                               });
-        KWin.registerShortcut("TILING: Resize Active Window To The Bottom",
+        _kwin.registerShortcut("TILING: Resize Active Window To The Bottom",
                               "TILING: Resize Active Window To The Bottom",
                               "Meta+Alt+J",
                               function() {
                                   try {
-                                      var client = workspace.activeClient;
+                                      var client = _ws.activeClient;
                                       if (client == null) {
                                           return;
                                       }
@@ -436,7 +437,7 @@ function TilingManager(timerResize, timerGeometryChanged) {
                                       print(err, "in resize-window-to-the-left");
                                   }
                               });
-        KWin.registerShortcut("TILING: Increase Number Of Masters",
+        _kwin.registerShortcut("TILING: Increase Number Of Masters",
                               "TILING: Increase Number Of Masters",
                               "Meta+*",
                               function() {
@@ -446,7 +447,7 @@ function TilingManager(timerResize, timerGeometryChanged) {
                                       print(err, "in Increase-Number-Of-Masters");
                                   }
                               });
-        KWin.registerShortcut("TILING: Decrease Number Of Masters",
+        _kwin.registerShortcut("TILING: Decrease Number Of Masters",
                               "TILING: Decrease Number Of Masters",
                               "Meta+_",
                               function() {
@@ -456,14 +457,14 @@ function TilingManager(timerResize, timerGeometryChanged) {
                                       print(err, "in Decrease-Number-Of-Masters");
                                   }
                               });
-        KWin.registerShortcut("TILING: Focus next tile",
+        _kwin.registerShortcut("TILING: Focus next tile",
                               "TILING: Focus next tile",
                               "",
                               function() {
                                   try {
-                                      var layout = self._getLayouts(workspace.currentDesktop, workspace.activeScreen)[0];
+                                      var layout = self._getLayouts(_ws.currentDesktop, _ws.activeScreen)[0];
                                       if (layout != null) {
-                                          var client = workspace.activeClient;
+                                          var client = _ws.activeClient;
                                           if (client != null) {
                                               var tile = self.tiles.getTile(client);
                                           }
@@ -476,20 +477,20 @@ function TilingManager(timerResize, timerGeometryChanged) {
                                               var index2 = index1 + 1;
                                           }
                                           var activateClient = layout.tiles[index2].clients[0];
-                                          workspace.activeClient = activateClient;
+                                          _ws.activeClient = activateClient;
                                       }
                                   } catch(err) {
                                       print(err, "in focus-next-tile");
                                   }
                               });
-        KWin.registerShortcut("TILING: Focus previous tile",
+        _kwin.registerShortcut("TILING: Focus previous tile",
                               "TILING: Focus previous tile",
                               "",
                               function() {
                                   try {
-                                      var layout = self._getLayouts(workspace.currentDesktop, workspace.activeScreen)[0];
+                                      var layout = self._getLayouts(_ws.currentDesktop, _ws.activeScreen)[0];
                                       if (layout != null) {
-                                          var client = workspace.activeClient;
+                                          var client = _ws.activeClient;
                                           if (client != null) {
                                               var tile = self.tiles.getTile(client);
                                           }
@@ -502,20 +503,20 @@ function TilingManager(timerResize, timerGeometryChanged) {
                                               var index2 = index1 - 1;
                                           }
                                           var activateClient = layout.tiles[index2].clients[0];
-                                          workspace.activeClient = activateClient;
+                                          _ws.activeClient = activateClient;
                                       }
                                   } catch(err) {
                                       print(err, "in focus-previous-tile");
                                   }
                               });
-        KWin.registerShortcut("TILING: Swap with next tile",
+        _kwin.registerShortcut("TILING: Swap with next tile",
                               "TILING: Swap with next tile",
                               "",
                               function() {
                                   try {
-                                      var layout = self._getLayouts(workspace.currentDesktop, workspace.activeScreen)[0];
+                                      var layout = self._getLayouts(_ws.currentDesktop, _ws.activeScreen)[0];
                                       if (layout != null) {
-                                          var client = workspace.activeClient;
+                                          var client = _ws.activeClient;
                                           if (client != null) {
                                               var tile = layout.getTile(client.x, client.y);
                                           }
@@ -533,14 +534,14 @@ function TilingManager(timerResize, timerGeometryChanged) {
                                       print(err, "in swap-with-next-tile");
                                   }
                               });
-        KWin.registerShortcut("TILING: Swap with previous tile",
+        _kwin.registerShortcut("TILING: Swap with previous tile",
                               "TILING: Swap with previous tile",
                               "",
                               function() {
                                   try {
-                                      var layout = self._getLayouts(workspace.currentDesktop, workspace.activeScreen)[0];
+                                      var layout = self._getLayouts(_ws.currentDesktop, _ws.activeScreen)[0];
                                       if (layout != null) {
-                                          var client = workspace.activeClient;
+                                          var client = _ws.activeClient;
                                           if (client != null) {
                                               var tile = layout.getTile(client.x, client.y);
                                           }
@@ -558,12 +559,12 @@ function TilingManager(timerResize, timerGeometryChanged) {
                                       print(err, "in swap-with-previous-tile");
                                   }
                               });
-        KWin.registerShortcut("TILING-I3: Set Wrap Horizontal Mode",
+        _kwin.registerShortcut("TILING-I3: Set Wrap Horizontal Mode",
                               "TILING-I3: Set Wrap Horizontal Mode",
                               "",
                               function() {
                                   try {
-                                      var layout = self._getLayouts(workspace.currentDesktop, workspace.activeScreen)[0];
+                                      var layout = self._getLayouts(_ws.currentDesktop, _ws.activeScreen)[0];
                                       if (layout != null && layout.layout.isI3Layout) {
                                           layout.layout.state = 'horizontalWrap';
                                       }
@@ -572,12 +573,12 @@ function TilingManager(timerResize, timerGeometryChanged) {
                                       print(err, "in i3-layout-set-wrap-horizontal-mode");
                                   }
                               });
-        KWin.registerShortcut("TILING-I3: Set Wrap Vertical Mode",
+        _kwin.registerShortcut("TILING-I3: Set Wrap Vertical Mode",
                               "TILING-I3: Set Wrap Vertical Mode",
                               "",
                               function() {
                                   try {
-                                      var layout = self._getLayouts(workspace.currentDesktop, workspace.activeScreen)[0];
+                                      var layout = self._getLayouts(_ws.currentDesktop, _ws.activeScreen)[0];
                                       if (layout != null && layout.layout.isI3Layout) {
                                           layout.layout.state = 'verticalWrap';
                                       }
@@ -586,12 +587,12 @@ function TilingManager(timerResize, timerGeometryChanged) {
                                       print(err, "in i3-layout-set-wrap-vertical-mode");
                                   }
                               });
-        KWin.registerShortcut("TILING-I3: Set Normal Mode",
+        _kwin.registerShortcut("TILING-I3: Set Normal Mode",
                               "TILING-I3: Set Normal Mode",
                               "",
                               function() {
                                   try {
-                                      var layout = self._getLayouts(workspace.currentDesktop, workspace.activeScreen)[0];
+                                      var layout = self._getLayouts(_ws.currentDesktop, _ws.activeScreen)[0];
                                       if (layout != null && layout.layout.isI3Layout) {
                                           layout.layout.state = 'normal';
                                       }
@@ -600,12 +601,12 @@ function TilingManager(timerResize, timerGeometryChanged) {
                                       print(err, "in i3-layout-set-normal-mode");
                                   }
                               });
-        KWin.registerShortcut("TILING: Move Window To New Desktop",
+        _kwin.registerShortcut("TILING: Move Window To New Desktop",
                               "TILING: Move Window To New Desktop",
                               "Meta+Shift+D",
                               function() {
                                   try {
-                                      var client = workspace.activeClient;
+                                      var client = _ws.activeClient;
                                       if (client != null) {
                                           var desktop = 0;
                                           // find first empty desktop
@@ -617,21 +618,21 @@ function TilingManager(timerResize, timerGeometryChanged) {
                                           }
                                           // if there is none, create a new one
                                           if (desktop == 0 && self.desktopCount < 20) {
-                                              workspace.desktops += 1;
+                                              _ws.desktops += 1;
                                               desktop = self.desktopCount;
                                           }
                                           // move the client and activate the desktop
                                           if (desktop > 0) {
                                               client.desktop = desktop;
-                                              workspace.currentDesktop = desktop;
-                                              workspace.activeClient = client;
+                                              _ws.currentDesktop = desktop;
+                                              _ws.activeClient = client;
                                           }
                                       }
                                   } catch(err) {
                                       print(err, "in move-window-to-new-desktop");
                                   }
                               });
-        KWin.registerShortcut("TILING: Dump Clients",
+        _kwin.registerShortcut("TILING: Dump Clients",
                               "TILING: Dump Clients",
                               "Meta+Shift+Escape",
                               function() {
@@ -641,12 +642,12 @@ function TilingManager(timerResize, timerGeometryChanged) {
                                       print(err, "in dump-clients");
                                   }
                               });
-        KWin.registerShortcut("TILING: Cycle Rotations",
+        _kwin.registerShortcut("TILING: Cycle Rotations",
                               "TILING: Cycle Rotations",
                               "Meta+Shift+R",
                               function() {
                                   try {
-                                      var layout = self._getLayouts(workspace.currentDesktop, workspace.activeScreen)[0];
+                                      var layout = self._getLayouts(_ws.currentDesktop, _ws.activeScreen)[0];
                                       if (layout != null && layout.layout.supportsRotation) {
                                           var grav = layout.layout.getGravity();
                                           switch (grav) {
@@ -752,7 +753,7 @@ TilingManager.prototype._onTileAdded = function(tile) {
 
 TilingManager.prototype._addTileToLayouts = function(tile, layouts) {
     var self = this;
-    var start = KWin.readConfig("placement", 0);
+    var start = _kwin.readConfig("placement", 0);
     layouts.forEach(function(layout) {
         // For I3Layout start at the end is the only option that makes sense,
         // so we should ignore the configured value.
@@ -807,10 +808,14 @@ TilingManager.prototype._getMaster = function(screen, desktop) {
 TilingManager.prototype._onTileRemoved = function(tile) {
     try {
         var activities = Object.keys(this.layouts);
-        var tileLayouts = this._getActivityLayouts(
-            activities, tile.getDesktop(), tile.getScreen());
-        tileLayouts.forEach(function(layout) {
-            layout.removeTile(tile);
+        // Search all layouts rather than routing by tile.getDesktop()/getScreen(),
+        // which may be stale after hibernate/wake session restore. Only call
+        // removeTile on the layout that actually contains the tile.
+        var allLayouts = this._getActivityLayouts(activities, -1, null);
+        allLayouts.forEach(function(layout) {
+            if (layout && layout.tiles.indexOf(tile) > -1) {
+                layout.removeTile(tile);
+            }
         });
     } catch(err) {
         print(err, "in TilingManager._onTileRemoved");
@@ -819,7 +824,7 @@ TilingManager.prototype._onTileRemoved = function(tile) {
 
 TilingManager.prototype._onNumberDesktopsChanged = function() {
     var self = this;
-    var newDesktopCount = workspace.desktops;
+    var newDesktopCount = _ws.desktops;
     var onAllDesktops = this.tiles.tiles.filter(function(tile) {
         return tile.desktop == -1;
     });
@@ -832,7 +837,9 @@ TilingManager.prototype._onNumberDesktopsChanged = function() {
         onAllDesktops.forEach(function(tile) {
             var layouts = self._getActivityLayouts(activities, i, tile.screen);
             layouts.forEach(function(layout) {
-                layout.removeTile(tile);
+                if (layout.tiles.indexOf(tile) > -1) {
+                    layout.removeTile(tile);
+                }
             });
         });
     }
@@ -859,13 +866,13 @@ TilingManager.prototype._onNumberDesktopsChanged = function() {
 
 TilingManager.prototype._onNumberScreensChanged = function() {
     // Add new screens
-    if (this.screenCount < workspace.numScreens) {
+    if (this.screenCount < _ws.numScreens) {
         for (var i = 0; i < this.desktopCount; i++) {
-            for (var j = this.screenCount; j < workspace.numScreens; j++) {
+            for (var j = this.screenCount; j < _ws.numScreens; j++) {
                 for (var a in this.layouts) {
                     this.layouts[a][i][j] = new Tiling(this.defaultLayout, i, j);
                     // Activate the new layout if necessary
-                    if (a == this._currentActivity && i == workspace.currentDesktop - 1) {
+                    if (a == this._currentActivity && i == _ws.currentDesktop - 1) {
                         this.layouts[a][i][j].activate();
                     }
                 };
@@ -873,14 +880,14 @@ TilingManager.prototype._onNumberScreensChanged = function() {
         }
     }
     // Remove deleted screens
-    if (this.screenCount > workspace.numScreens) {
+    if (this.screenCount > _ws.numScreens) {
         for (var i = 0; i < this.desktopCount; i++) {
             for (var a in this.layouts) {
-                this.layouts[a][i].length = workspace.numScreens;
+                this.layouts[a][i].length = _ws.numScreens;
             };
         }
     }
-    this.screenCount = workspace.numScreens;
+    this.screenCount = _ws.numScreens;
 };
 
 TilingManager.prototype._onScreenResized = function(screen) {
@@ -946,27 +953,73 @@ TilingManager.prototype._onTileDesktopChanged = function(tile, oldDesktop, newDe
     };
 
 TilingManager.prototype._onTileActivitiesChanged = function(tile) {
-    if (tile.onAllActivities()) {
-        var activities = Object.keys(this.layouts);
-    } else {
-        var activities = tile.getActivities();
+    try {
+        if (tile.onAllActivities()) {
+            var activities = Object.keys(this.layouts);
+        } else {
+            var activities = tile.getActivities();
+        }
+        var tileScreen = tile.getScreen();
+        var tileDesktop = tile.getDesktop();
+        var newLayouts = this._getActivityLayouts(activities, tileDesktop, tileScreen);
+        // Fix 10 (2026-10-19): look for the tile in EVERY layout (all activities,
+        // desktops and screens), not just at its current desktop/screen. After a
+        // resume restart the tile's desktop/screen can be stale, and the copy in the
+        // previous activity's layout was never found -> permanent hole ("ghost") in
+        // that activity's tiling. _changeTileLayouts' own fallback didn't run because
+        // the new layout counted as "found".
+        var oldLayouts = this._getActivityLayouts(Object.keys(this.layouts), -1, null)
+            .filter(function(layout) {
+                return layout && layout.tiles.indexOf(tile) > -1;
+            });
+        this._changeTileLayouts(tile, oldLayouts, newLayouts);
+        this._getLayouts(this._currentDesktop, this._currentScreen)[0].activate();
+    } catch(err) {
+        print(err, "in TilingManager._onTileActivitiesChanged");
     }
-    var tileScreen = tile.getScreen();
-    var tileDesktop = tile.getDesktop();
-    var newLayouts = this._getActivityLayouts(activities, tileDesktop, tileScreen);
-    var oldLayouts = new Array();
-    for (var activityId in this.layouts) {
-        var layouts = this._getActivityLayouts([activityId], tileDesktop, tileScreen);
+};
+
+/**
+ * Fix 10 (2026-10-19): remove tiles from an activity's layouts whose window is not
+ * on that activity according to KWin's live client.activities (empty = all
+ * activities, kept). Also resyncs the tile's cached activity list. Catches ghosts
+ * from any path, including windows tiled at startup before KWin knew their
+ * activities and activity changes for which no signal reached the tile.
+ */
+TilingManager.prototype._pruneForeignTiles = function(activityId, desktop) {
+    try {
+        var layouts = this._getActivityLayouts([activityId], desktop == null ? -1 : desktop, null);
+        var pruned = 0;
         for (var i = 0; i < layouts.length; i++) {
-            if (layouts[i].tiles.includes(tile)) {
-                oldLayouts.push(layouts[i]);
+            var layout = layouts[i];
+            if (!layout) {
+                continue;
+            }
+            var foreign = layout.tiles.filter(function(tile) {
+                var client = tile.clients[0];
+                if (client == null) {
+                    return false;
+                }
+                var live = Array.from(client.activities);
+                return live.length > 0 && live.indexOf(activityId) < 0;
+            });
+            for (var j = 0; j < foreign.length; j++) {
+                var client = foreign[j].clients[0];
+                print("TILING: pruning ghost tile", client.resourceClass.toString(),
+                      '"' + client.caption + '"', "from activity", activityId,
+                      "desktop", layout.desktop, "screen", layout.screen);
+                foreign[j]._activities = Array.from(client.activities);
+                layout.removeTile(foreign[j]);
+                pruned++;
             }
         }
-    };
-    this._changeTileLayouts(tile, oldLayouts, newLayouts);
-    this._getLayouts(this._currentDesktop, this._currentScreen)[0].activate();
+        return pruned;
+    } catch(err) {
+        print(err, "in TilingManager._pruneForeignTiles");
+        return 0;
+    }
 };
-  
+
 TilingManager.prototype._onTileMovingStarted = function(tile) {
     // NOTE: This supports only one moving window, breaks with multitouch input
     this._moving = true;
@@ -984,7 +1037,20 @@ TilingManager.prototype._onTileMovingEnded = function(tile) {
                 var startLayout =
                     this._getLayouts(this._currentDesktop, tile.getScreen())[0];
                 var endLayout = this._getLayouts(this._currentDesktop, client.screen)[0];
-                startLayout.removeTile(tile);
+                // Guard: tile may not be in expected layout if state is stale
+                if (startLayout.tiles.indexOf(tile) > -1) {
+                    startLayout.removeTile(tile);
+                } else {
+                    // Search all layouts for the tile
+                    var activities = Object.keys(this.layouts);
+                    var allLayouts = this._getActivityLayouts(activities, -1, null);
+                    for (var i = 0; i < allLayouts.length; i++) {
+                        if (allLayouts[i].tiles.indexOf(tile) > -1) {
+                            allLayouts[i].removeTile(tile);
+                            break;
+                        }
+                    }
+                }
                 endLayout.addTile(tile,
                                   this.tiles.focusHistory.previous,
                                   windowRect.x + windowRect.width / 2,
@@ -1009,20 +1075,41 @@ TilingManager.prototype._onTileMovingEnded = function(tile) {
 
 TilingManager.prototype._changeTileLayouts = function(tile, oldLayouts, newLayouts) {
         try {
+            var self = this;
+            var removedFromAny = false;
             if (oldLayouts != null) {
                 oldLayouts.forEach(function(layout) {
                     if (newLayouts != null) {
                         var inNew = newLayouts.indexOf(layout);
                         if (inNew > -1) {
                             newLayouts.splice(inNew, 1);
+                            removedFromAny = true;
                             return;
                         }
                     }
-                    layout.removeTile(tile);
+                    if (layout.tiles.indexOf(tile) > -1) {
+                        layout.removeTile(tile);
+                        removedFromAny = true;
+                    }
+                });
+            }
+            // If tile wasn't found in any oldLayout, search all layouts
+            // (desktop/screen may be stale after hibernate/wake session restore)
+            if (!removedFromAny) {
+                var activities = Object.keys(self.layouts);
+                var allLayouts = self._getActivityLayouts(activities, -1, null);
+                allLayouts.forEach(function(layout) {
+                    if (layout && layout.tiles.indexOf(tile) > -1) {
+                        if (newLayouts != null && newLayouts.indexOf(layout) > -1) {
+                            newLayouts.splice(newLayouts.indexOf(layout), 1);
+                        } else {
+                            layout.removeTile(tile);
+                            removedFromAny = true;
+                        }
+                    }
                 });
             }
             if (newLayouts != null) {
-                var self = this;
                 newLayouts.forEach(function(layout) {
                     layout.tiles.forEach(function(t) {
                         t.unmaximize();
@@ -1037,7 +1124,7 @@ TilingManager.prototype._changeTileLayouts = function(tile, oldLayouts, newLayou
     };
 
 TilingManager.prototype._onCurrentDesktopChanged = function() {
-    if (this._currentDesktop === workspace.currentDesktop) {
+    if (this._currentDesktop === _ws.currentDesktop) {
         return;
     }
     var layouts = this._getLayouts(this._currentDesktop, null);
@@ -1046,7 +1133,8 @@ TilingManager.prototype._onCurrentDesktopChanged = function() {
             layout.deactivate();
         }
     });
-    this._currentDesktop = workspace.currentDesktop;
+    this._currentDesktop = _ws.currentDesktop;
+    this._pruneForeignTiles(this._currentActivity, this._currentDesktop);
     var layouts = this._getLayouts(this._currentDesktop, null);
     layouts.forEach(function(layout) {
         if (! layout.active) {
@@ -1074,7 +1162,7 @@ TilingManager.prototype._switchLayout = function(desktop, screen, layoutIndex) {
 };
 
 TilingManager.prototype._moveTile = function(direction) {
-    var client = workspace.activeClient;
+    var client = _ws.activeClient;
     if (client == null) {
         return;
     }
@@ -1114,7 +1202,7 @@ TilingManager.prototype._moveTile = function(direction) {
         // No tile to swap. Move to next screen in direction
         var targetScreen = util.nextScreenInDirection(this._currentScreen, desktop, direction);
         if (targetScreen != null) {
-            var targetRect = workspace.clientArea(KWin.ScreenArea, targetScreen, desktop);
+            var targetRect = _ws.clientArea(_kwin.ScreenArea, targetScreen, desktop);
             client.geometry = targetRect;
         }
     }
@@ -1163,7 +1251,7 @@ TilingManager.prototype._getActivityLayouts = function(activities, desktop, scre
 };
 
 TilingManager.prototype._isDesktopEmpty = function(desktop) {
-    var clients = workspace.clientList();
+    var clients = _ws.clientList();
     var empty = true;
     for (var i = 0; i < clients.length; i++) {
         if (!clients[i].onAllDesktops && clients[i].desktop == desktop) {
@@ -1196,7 +1284,7 @@ TilingManager.prototype._compactDesktops = function() {
                 destinationLayouts[i].desktop = destination;
                 sourceLayouts[i].desktop = source;
             }
-            var clients = workspace.clientList();
+            var clients = _ws.clientList();
             for (var i = 0; i < clients.length; i++) {
                 var cl = clients[i];
                 if (!cl.onAllDesktops && cl.desktop == source) {
@@ -1214,7 +1302,7 @@ TilingManager.prototype._compactDesktops = function() {
 }
 
 TilingManager.prototype._removeEmptyDesktops = function() {
-    var clients = workspace.clientList();
+    var clients = _ws.clientList();
 
     this._compactDesktops();
 
@@ -1222,15 +1310,15 @@ TilingManager.prototype._removeEmptyDesktops = function() {
     // Desktop 1 is not a good candidate for removal
     for (var i = this.desktopCount; i > 1; i--) {
         if (this._isDesktopEmpty(i)) {
-            workspace.desktops -= 1;
-            if (!workspace.activeClient) {
+            _ws.desktops -= 1;
+            if (!_ws.activeClient) {
                 var master = this._getMaster(this._currentScreen, this._currentDesktop);
                 if (master) {
                     var client = master.getActiveClient();
                     if (!client) {
                         client = master.clients[0];
                     }
-                    workspace.activeClient = client;
+                    _ws.activeClient = client;
                 }
             }
         } else {
@@ -1299,6 +1387,7 @@ TilingManager.prototype._onCurrentActivityChanged = function(id) {
         this._addActivity(id);
     }
     this._currentActivity = id;
+    this._pruneForeignTiles(id, null);
 
     var layouts = this._getLayouts(-1, null);
     layouts.forEach(function(layout) {

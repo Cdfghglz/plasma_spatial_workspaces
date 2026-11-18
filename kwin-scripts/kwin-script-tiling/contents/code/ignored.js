@@ -62,7 +62,7 @@ ignored.isIgnored = function(client) {
     // TODO: Add regex and more options (by title/caption, override a floater, maybe even a complete scripting language / code)
     // A QLineEdit will backslash-escape ",", so we'll need to split on `\\,`.
     // We trim whitespace around commas, and we lowercase it because kwin lowercases the resourceClass.
-    var floaters = KWin.readConfig("floaters", "").toLowerCase().trim().replace(/\s*,\s*/g,",").split("\\,");
+    var floaters = _kwin.readConfig("floaters", "").toLowerCase().trim().replace(/\s*,\s*/g,",").split("\\,");
 
     if (floaters.indexOf(client.resourceClass.toString()) > -1
         || floaters.indexOf(client.resourceName.toString()) > -1

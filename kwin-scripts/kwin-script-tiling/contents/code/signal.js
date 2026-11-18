@@ -18,6 +18,13 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 *********************************************************************/
 
+// Capture workspace reference at include time.
+// Qt.include() scoping makes `workspace` undefined in callbacks later,
+// but it IS available now (at include time). Vars declared in included
+// files are shared across all other includes via Qt.include() scope.
+var _ws = workspace;
+var _kwin = KWin;
+
 /**
  * Class which manages connections to a signal and allows for signal/slot event
  * handling.

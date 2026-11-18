@@ -142,7 +142,11 @@ util.multiplyRectMatrices = function(m1, m2) {
  * @return Rectangle which contains the area which shall be used by layouts.
  */
 util.getTilingArea = function(screen, desktop) {
-    var cA = workspace.clientArea(KWin.PlacementArea, screen, desktop);
+    // Clamp screen to valid range (monitor may have disappeared after hibernate)
+    if (screen < 0 || screen >= _ws.numScreens) {
+        screen = 0;
+    }
+    var cA = _ws.clientArea(_kwin.PlacementArea, screen, desktop);
     return util.copyRect(cA);
 };
 
@@ -176,12 +180,12 @@ util.assertRectInScreen = function(rect, screenRectangle) {
 };
 
 /**
- * workspace.clientArea leaves holes for panels.
+ * _ws.clientArea leaves holes for panels.
  * Also there could be gaps between screens.
  * Therefore I do a search for the screen with minimal distance in given direction.
  */
 util.nextScreenInDirection = function(curScreen, desktop, direction) {
-    var curScreenRect = workspace.clientArea(KWin.ScreenArea, curScreen, desktop);
+    var curScreenRect = _ws.clientArea(_kwin.ScreenArea, curScreen, desktop);
     var targetScreen = null;
 
     // Limit jump distance
@@ -200,8 +204,8 @@ util.nextScreenInDirection = function(curScreen, desktop, direction) {
     }
 
     // assumes a fully horizontal or vertical screen setup
-    for (var i=0; i<workspace.numScreens; i++) {
-        var screenRect = workspace.clientArea(KWin.ScreenArea, i, desktop);
+    for (var i=0; i<_ws.numScreens; i++) {
+        var screenRect = _ws.clientArea(_kwin.ScreenArea, i, desktop);
 
         switch (direction) {
             case Direction.Left:
@@ -240,15 +244,15 @@ util.assertTrue = function(condition, message) {
         print(message);
     }
 };
-// readConfig moved to KWin.readConfig for KWin 5
-if(KWin.readConfig == null) {
-    print("Setting readConfig to KWin.readConfig");
-    KWin.readConfig = readConfig;
+// readConfig moved to _kwin.readConfig for KWin 5
+if(_kwin.readConfig == null) {
+    print("Setting readConfig to _kwin.readConfig");
+    _kwin.readConfig = readConfig;
 } else {
     print("We're running under KWin 5");
 }
 
-// HACK: KWin 5.2 (at least) will sometimes give us client.desktop == workspace.desktops
+// HACK: KWin 5.2 (at least) will sometimes give us client.desktop == _ws.desktops
 // (i.e. a desktop number that is too large)
 // when a client is on all desktops
 util.getClientDesktop = function(client) {

@@ -30,7 +30,7 @@ function HalfLayout(screenRectangle) {
     } catch(err) {
         print(err, "in HalfLayout");
     }
-    this.masterRatio = 100 / KWin.readConfig("halfLayoutMasterRatio", 50);
+    this.masterRatio = 100 / _kwin.readConfig("halfLayoutMasterRatio", 50);
     this.firstWidth = this.screenRectangle.width / this.masterRatio;
     this.master = 0;
     this.masterCount = 1;

@@ -49,13 +49,13 @@ function Tiling(layoutType, desktop, screen) {
         this.active = false;
         this.userActive = true;
 
-        var gapSize = KWin.readConfig("gapSize", 0);  /* stick to old gaps config by default */
-        this.windowsGapSizeHeight = KWin.readConfig("windowsGapSizeHeight", gapSize);
-        this.windowsGapSizeWidth = KWin.readConfig("windowsGapSizeWidth", gapSize);
-        this.screenGapSizeLeft = KWin.readConfig("screenGapSizeLeft", 0);
-        this.screenGapSizeRight = KWin.readConfig("screenGapSizeRight", 0);
-        this.screenGapSizeTop = KWin.readConfig("screenGapSizeTop", 0);
-        this.screenGapSizeBottom = KWin.readConfig("screenGapSizeBottom", 0);
+        var gapSize = _kwin.readConfig("gapSize", 0);  /* stick to old gaps config by default */
+        this.windowsGapSizeHeight = _kwin.readConfig("windowsGapSizeHeight", gapSize);
+        this.windowsGapSizeWidth = _kwin.readConfig("windowsGapSizeWidth", gapSize);
+        this.screenGapSizeLeft = _kwin.readConfig("screenGapSizeLeft", 0);
+        this.screenGapSizeRight = _kwin.readConfig("screenGapSizeRight", 0);
+        this.screenGapSizeTop = _kwin.readConfig("screenGapSizeTop", 0);
+        this.screenGapSizeBottom = _kwin.readConfig("screenGapSizeBottom", 0);
     } catch(err) {
         print(err, "in Tiling");
     }
@@ -111,7 +111,28 @@ Tiling.prototype.addTile = function(tile, previouslyFocusedClient, x, y) {
                 if (tile.tileIndex > -1 && tile.tileIndex <= this.tiles.length) {
                     this.tiles.splice(tile.tileIndex, 0, tile);
                 } else {
-                    this.tiles.push(tile);
+                    // No saved tileIndex (e.g., after KWin restart). Insert
+                    // sorted by geometry (x then y) to preserve layout order.
+                    // Window positions survive restart via X server.
+                    var newClient = tile.clients[0];
+                    var inserted = false;
+                    if (newClient) {
+                        for (var i = 0; i < this.tiles.length; i++) {
+                            var ec = this.tiles[i].clients[0];
+                            if (ec) {
+                                if (newClient.geometry.x < ec.geometry.x ||
+                                    (newClient.geometry.x == ec.geometry.x &&
+                                     newClient.geometry.y < ec.geometry.y)) {
+                                    this.tiles.splice(i, 0, tile);
+                                    inserted = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (!inserted) {
+                        this.tiles.push(tile);
+                    }
                 }
             }
         }
@@ -174,6 +195,15 @@ Tiling.prototype.swapTiles = function(tile1, tile2) {
 Tiling.prototype.activate = function() {
     if (this.userActive == true) {
         this.active = true;
+        // Restore keepBelow for all non-maximized tiles
+        // (deactivate sets keepBelow=false; _updateAllTiles may skip
+        // restoring it if setClientGeometry hits an early-return guard)
+        for (var i = 0; i < this.tiles.length; i++) {
+            this.tiles[i].active = true;
+            if (!this.tiles[i].maximized) {
+                this.tiles[i].setKeepBelow(true);
+            }
+        }
         // Resize the tiles like specified by the layout
         this._updateAllTiles();
     }
@@ -368,7 +398,7 @@ Tiling.prototype.decrementMaster = function() {
  * Apply gaps to a rectangle, in-place
 */
 Tiling.prototype.applyGaps = function(rect) {
-    if (KWin.readConfig("fullscreenGaps", false) == false && util.compareRect(rect, this.screenRectangle) == true) return;
+    if (_kwin.readConfig("fullscreenGaps", false) == false && util.compareRect(rect, this.screenRectangle) == true) return;
     if (rect.x + rect.width == this.screenRectangle.x + this.screenRectangle.width) {
         rect.width -= this.screenGapSizeRight;
     } else {

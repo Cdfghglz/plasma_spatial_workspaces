@@ -64,7 +64,7 @@ Layout.prototype.construct = function(screenRectangle) {
          */
         this.tiles = [];
         // TODO
-        if (KWin.readConfig("autorotatePortrait", false) &&
+        if (_kwin.readConfig("autorotatePortrait", false) &&
             screenRectangle.width < screenRectangle.height) {
             this._gravity = Gravity.Right;
         }

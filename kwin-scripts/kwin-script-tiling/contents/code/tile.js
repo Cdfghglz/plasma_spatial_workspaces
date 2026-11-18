@@ -104,16 +104,16 @@ function Tile(firstClient, tileIndex) {
 
         this.rectangle = null;
 
-        this.respectMinMax = KWin.readConfig("respectMinMax", true);
+        this.respectMinMax = _kwin.readConfig("respectMinMax", true);
 
-        var gapSize = KWin.readConfig("gapSize", 0);  /* stick to old gaps config by default */
-        this.windowsGapSizeHeight = KWin.readConfig("windowsGapSizeHeight", gapSize);
-        this.windowsGapSizeWidth = KWin.readConfig("windowsGapSizeWidth", gapSize);
-        this.screenGapSizeLeft = KWin.readConfig("screenGapSizeLeft", 0);
-        this.screenGapSizeRight = KWin.readConfig("screenGapSizeRight", 0);
-        this.screenGapSizeTop = KWin.readConfig("screenGapSizeTop", 0);
-        this.screenGapSizeBottom = KWin.readConfig("screenGapSizeBottom", 0);
-        if (KWin.readConfig("noBorder", false)) {
+        var gapSize = _kwin.readConfig("gapSize", 0);  /* stick to old gaps config by default */
+        this.windowsGapSizeHeight = _kwin.readConfig("windowsGapSizeHeight", gapSize);
+        this.windowsGapSizeWidth = _kwin.readConfig("windowsGapSizeWidth", gapSize);
+        this.screenGapSizeLeft = _kwin.readConfig("screenGapSizeLeft", 0);
+        this.screenGapSizeRight = _kwin.readConfig("screenGapSizeRight", 0);
+        this.screenGapSizeTop = _kwin.readConfig("screenGapSizeTop", 0);
+        this.screenGapSizeBottom = _kwin.readConfig("screenGapSizeBottom", 0);
+        if (_kwin.readConfig("noBorder", false)) {
             firstClient.noBorder = true;
         }
         this.maximized = false;
@@ -225,7 +225,7 @@ Tile.prototype.setClientGeometry = function(client) {
             return;
         }
         // This client is bogus
-        if (client.minSize.width == client.maxSize.width && client.minSize.height == client.maxSize.width) {
+        if (client.minSize.width == client.maxSize.width && client.minSize.height == client.maxSize.height) {
             return;
         }
         if (this.rectangle) {
@@ -233,7 +233,9 @@ Tile.prototype.setClientGeometry = function(client) {
             // also because that allows us to not set it for floating ones.
             client.keepBelow = true;
             if (client.screen != this._currentScreen) {
-                this._currentScreen = client.screen;
+                // Clamp to valid screen range (monitor may vanish after hibernate)
+                this._currentScreen = (client.screen >= 0 && client.screen < _ws.numScreens)
+                    ? client.screen : 0;
             }
             // Respect min/maxSize
             var changedRect = false;
@@ -402,17 +404,22 @@ Tile.prototype.onClientStepUserMovedResized = function(client) {
 };
 
 Tile.prototype.onClientFinishUserMovedResized = function(client) {
-    if (!this.active) return;
     try {
+        // Always restore keepBelow: true if tile active, false if inactive
+        // (deactivate() sets keepBelow=false, so stay consistent)
+        client.keepBelow = this.active;
+        // Always clear _moving/_resizing flags to prevent them getting stuck
         if (this._moving) {
             this._moving = false;
-            this.movingEnded.emit();
+            if (this.active) {
+                this.movingEnded.emit();
+            }
         } else if (this._resizing) {
             this._resizing = false;
-            this.resizingEnded.emit();
+            if (this.active) {
+                this.resizingEnded.emit();
+            }
         }
-        // Put the client on the same layer as the other tilers again
-        client.keepBelow = true;
     } catch(err) {
         print(err, "in Tile.onClientFinishUserMovedResized");
     }
@@ -429,7 +436,7 @@ Tile.prototype.removeClient = function(client) {
 Tile.prototype.addClient = function(client) {
     try {
         if (this.clients.indexOf(client) == -1) {
-            if (KWin.readConfig("noBorder", false)) {
+            if (_kwin.readConfig("noBorder", false)) {
                 client.noBorder = true;
             }
             this.clients.push(client);
@@ -452,7 +459,7 @@ Tile.prototype.onClientMaximizedStateChanged = function(client, h, v) {
             // We might get a geometryChanged signal before this
             // so we need to manually maximize the client.
             client.tiling_resize = true;
-            client.geometry = workspace.clientArea(KWin.MaximizeFullArea, this._currentScreen, this._currentDesktop);
+            client.geometry = _ws.clientArea(_kwin.MaximizeFullArea, this._currentScreen, this._currentDesktop);
             client.tiling_resize = false;
             this.maximized = true;
         } else {
