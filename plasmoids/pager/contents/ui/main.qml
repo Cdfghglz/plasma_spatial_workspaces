@@ -184,48 +184,34 @@ MouseArea {
     }
 
     // PSW: Query KWin for per-activity spatial grid layout via D-Bus.
-    // Each query appends a unique suffix (bash comment) so the executable
-    // data engine doesn't return stale cached results.
+    // A single fixed source is re-run by the executable engine every
+    // `interval` ms. Never make the source name unique per query: DataSource
+    // keeps one property per source name forever, so plasmashell's main
+    // thread slows down the longer the session runs.
     PlasmaCore.DataSource {
         id: spatialGridSource
         engine: "executable"
-        property int querySeq: 0
+        interval: 2000
+        readonly property string vdm: "qdbus org.kde.KWin /VirtualDesktopManager org.kde.KWin.VirtualDesktopManager."
+        readonly property string query: vdm + "spatialGridRows; " + vdm + "spatialGridColumns; " + vdm + "spatialGridLayout"
+        property string lastLayout: ""
         onNewData: {
-            var stdout = (data["stdout"] || "").trim()
-            disconnectSource(sourceName)
-            if (sourceName.indexOf("spatialGridRows") !== -1) {
-                root.spatialRows = parseInt(stdout) || 0
-                if (root.spatialRows > 0) {
-                    querySeq++
-                    connectSource("qdbus org.kde.KWin /VirtualDesktopManager org.kde.KWin.VirtualDesktopManager.spatialGridColumns #" + querySeq)
-                }
-            } else if (sourceName.indexOf("spatialGridColumns") !== -1) {
-                root.spatialCols = parseInt(stdout) || 0
-                if (root.spatialCols > 0) {
-                    querySeq++
-                    connectSource("qdbus org.kde.KWin /VirtualDesktopManager org.kde.KWin.VirtualDesktopManager.spatialGridLayout #" + querySeq)
-                }
-            } else if (sourceName.indexOf("spatialGridLayout") !== -1) {
-                if (stdout.length > 0) {
-                    root.spatialGridCells = stdout.split(",").map(function(s) { return parseInt(s) || 0; })
-                } else {
-                    root.spatialGridCells = []
-                }
+            var lines = (data["stdout"] || "").split("\n")
+            var rows = parseInt(lines[0]) || 0
+            var cols = parseInt(lines[1]) || 0
+            var layout = (rows > 0 && cols > 0) ? (lines[2] || "").trim() : ""
+            if (root.spatialRows !== rows) root.spatialRows = rows
+            if (root.spatialCols !== cols) root.spatialCols = cols
+            if (layout !== lastLayout) {
+                lastLayout = layout
+                root.spatialGridCells = layout.length > 0
+                    ? layout.split(",").map(function(s) { return parseInt(s) || 0; })
+                    : []
             }
         }
         function refresh() {
-            querySeq++
-            connectSource("qdbus org.kde.KWin /VirtualDesktopManager org.kde.KWin.VirtualDesktopManager.spatialGridRows #" + querySeq)
+            connectSource(query)
         }
-    }
-
-    // PSW: Poll spatial grid periodically to catch activity switches.
-    Timer {
-        id: spatialRefreshTimer
-        interval: 2000
-        running: root.spatialRows > 0
-        repeat: true
-        onTriggered: spatialGridSource.refresh()
     }
 
     PagerModel {
