@@ -98,6 +98,12 @@ make -C activityjumper/build ActivityJumper && pkill -x ActivityJumper        # 
 - **KDE packages must be real directories**, not symlinks (see Rule above).
 - **Desktop grid overlays** (rename pencil, ×, +) are interactive scenes on the first screen only; other
   screens draw copies and clicks there are mapped onto the first-screen overlay (`mapToPrimaryOverlay`).
+- **ActivityJumper history inside one activity** (2026-11-20): since the 2025-08 "auto-pin before
+  jumping away" change, every jumper key pressed *inside* KOM pinned the spot left, so Meta+Space walked
+  back through every KOM desktop visited. (The 2020 build on 20.04 had no auto-pin, hence "it used to
+  work".) Now jumps within an activity don't pin and replace the previous destination key of that
+  activity, and Meta+Space goes to the most recent entry in *another* activity (pin, lock or key),
+  dropping the in-activity entries above it. With nothing outside the activity it steps back as before.
 - **`tobiifreed.service` start job hangs**, which keeps `default.target` from ever being reached; never
   order desktop units `After=default.target`.
 
